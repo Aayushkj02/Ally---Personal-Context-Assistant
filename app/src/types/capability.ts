@@ -42,6 +42,33 @@ export const CAPABILITY_DOMAIN: Record<
   ringer: { kind: 'enum', values: RINGER_MODES },
 };
 
+/**
+ * Communication channels a priority preference can apply to.
+ *
+ * ENFORCEMENT DIFFERS BY CHANNEL and the UI must say so (ADR-111):
+ *   calls    Android enforces, via NotificationManager.Policy PRIORITY_CATEGORY_CALLS
+ *   sms      Android enforces, via PRIORITY_CATEGORY_MESSAGES
+ *   whatsapp Ally REMEMBERS ONLY. No public API lets one app grant another app's
+ *            notifications a DND bypass. Android 16 has per-app bypass internally
+ *            (`mAppBypassDndList`) but it is not in the public SDK.
+ *
+ * Calls and SMS are further limited to Android's sender SCOPES — starred contacts,
+ * all contacts, or anyone. There is no per-individual-contact DND exception for apps.
+ */
+export const CHANNELS = ['calls', 'sms', 'whatsapp'] as const;
+export type Channel = (typeof CHANNELS)[number];
+
+/** The granularity Android actually offers. Not per-contact. */
+export const SENDER_SCOPES = ['starred', 'contacts', 'anyone'] as const;
+export type SenderScope = (typeof SENDER_SCOPES)[number];
+
+/** Which channels the device can actually enforce, as opposed to merely remember. */
+export const CHANNEL_ENFORCEABLE: Record<Channel, boolean> = {
+  calls: true,
+  sms: true,
+  whatsapp: false,
+};
+
 /** Android permission a capability needs before it may execute (SRS FR-12). */
 export interface PermissionRequirement {
   /** Stable key used by the Permissions screen and PermissionState rows. */
