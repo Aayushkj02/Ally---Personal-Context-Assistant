@@ -16,3 +16,8 @@ android {
     abortOnError false
   }
 }
+
+dependencies {
+  // JVM unit tests for the emergency rule — no device, no ContentResolver.
+  testImplementation 'junit:junit:4.13.2'
+}

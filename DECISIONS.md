@@ -387,3 +387,70 @@ Because entries never move and IDs never collide, a merge conflict here is alway
   re-snapshots after each change to refresh its display, which overwrote the original before
   restore could use it. The map fixes that. The cache is process-lifetime only; durable
   restoration across an app kill needs the value persisted in Dhrey's `device_snapshot` table.
+
+### ADR-111 — Priority preferences: remember every channel, enforce only what Android allows
+- **Date:** 2026-08-29 · **Author:** Aayush · **Phase:** 1 · **Status:** Accepted
+- **Decision:** `PriorityPreference` records the user's intent per mode, per channel, per
+  subject, and carries an explicit `enforceable` flag. Calls and SMS are applied to the device
+  through `NotificationManager.Policy`. **WhatsApp is stored and never applied.** The UI must
+  show remembered-but-not-enforced as a distinct state.
+- **Reason:** Checked against the API 36 SDK with `javap` rather than assumed. The public
+  `NotificationManager.Policy` exposes categories CALLS, MESSAGES, CONVERSATIONS,
+  REPEAT_CALLERS, ALARMS, MEDIA, EVENTS, REMINDERS, SYSTEM and sender scopes ANY / CONTACTS /
+  STARRED, with three constructors — none of which reach per-app or per-contact fields.
+  Android 16 *does* hold `mAppBypassDndList` and `mExceptionContacts` internally (both visible
+  in `dumpsys notification`), so per-app and per-contact DND bypass exists in the platform and
+  is simply not public. Building a WhatsApp toggle that silently did nothing would be the exact
+  false-success this project keeps designing against.
+- **Alternatives considered:** Omit WhatsApp from the UI — the user asked for it and the intent
+  is worth capturing for when the API opens up or for a future NotificationListenerService.
+  Claim enforcement and hope — dishonest, and the demo would fail the moment a judge tested it.
+  `NotificationListenerService` — can observe and dismiss notifications but cannot grant a DND
+  bypass, needs an invasive grant, and is not a hackathon-scale answer.
+- **Impact:** Two honest limits now surface in the product rather than hiding in code. First,
+  **there is no per-individual-contact exception**: Android offers starred / contacts / anyone,
+  so "Mom" means "a starred contact" and the demo contact must actually be starred. Second,
+  **WhatsApp is a remembered preference only.** `CHANNEL_ENFORCEABLE` in the frozen types is the
+  single source of truth for that distinction so UI and policy cannot disagree.
+
+### ADR-112 — Frozen contract extended for channel-scoped priority preferences
+- **Date:** 2026-08-29 · **Author:** Aayush · **Phase:** 1 · **Status:** Accepted
+- **Decision:** Three additive changes to `app/src/types/`, made with Aayush's approval under
+  the ADR-006 change protocol: `Channel` + `SenderScope` + `CHANNEL_ENFORCEABLE` in
+  `capability.ts`, `PriorityPreference` in `models.ts`, and an **optional** `channel` field on
+  `IntentException` in `intent.ts`.
+- **Reason:** The frozen contracts could not represent this feature at all. `Preference` is
+  keyed by `Capability` (`dnd|brightness|alarm|ringer`) with no notion of a person or a channel.
+  `TemporaryOverride` has a `subject` but is time-bounded with `expiresAt`/`active`, which is
+  the wrong shape for a standing priority list. And `IntentException` had no channel, so the
+  parser could not distinguish "let Mom call me" from "let Mom message me".
+- **Alternatives considered:** Overload `TemporaryOverride` with a null expiry — conflates
+  "expires" with "permanent" in the one table whose semantics the demo depends on. Store
+  priority preferences in the UI layer — a second storage system, explicitly forbidden.
+- **Impact:** Purely additive, so nothing existing breaks — verified: `tsc` clean and Shlok's
+  21 tests still pass untouched. **Shlok and Dhrey must be told**: Shlok can now set
+  `IntentException.channel` (absent means calls, so his existing golden commands are unaffected),
+  and Dhrey needs a `priority_preference` table plus a repository. Neither is blocked by this
+  change; both are unblocked by it.
+
+### ADR-113 — Four enforcement states, because "saved" and "working" are different promises
+- **Date:** 2026-08-29 · **Author:** Aayush · **Phase:** 1 · **Status:** Accepted
+- **Decision:** Every priority channel reports one of four states — `enforced`,
+  `preference_only`, `unsupported`, `failed` — as `ChannelEnforcement` in the frozen contract,
+  with `ENFORCEMENT_PRESENTATION` supplying the UI copy so screens cannot invent their own.
+  `setPriority` returns a per-channel breakdown rather than one boolean.
+- **Reason:** A single `ok` cannot express what actually happened here. Calls and SMS are
+  applied to Android and read back; WhatsApp is stored and never sent to the device at all.
+  Both would report `ok: true`, and a UI built on that would tell the user their WhatsApp
+  preference was active. `preference_only` exists precisely so that sentence is impossible to
+  write by accident. It is the same reasoning as the truthful action-status vocabulary in
+  `STATUS_PRESENTATION`, applied one level up to channels.
+- **Alternatives considered:** Reuse `ActionStatus` — it has no state meaning "we saved this but
+  the platform cannot act on it", and stretching `skipped` to cover that would hide exactly the
+  distinction worth surfacing. Return `ok` plus per-channel booleans — encodes the same
+  information while letting callers ignore it, which is how the honest case gets dropped.
+- **Impact:** `enforced` is only returned after a policy read-back confirms Android held the
+  change, so it means the phone will genuinely behave differently. `preference_only` is
+  hard-coded for WhatsApp and cannot be reached by a successful device call. The permission and
+  unsupported paths carry the same breakdown, so a caller never has to guess which channels were
+  affected by a failure.

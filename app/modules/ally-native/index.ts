@@ -57,6 +57,15 @@ export interface AllyNativeSpec {
     allowStarred: boolean,
     allowRepeatCallers: boolean,
   ): Record<string, unknown>;
+  /**
+   * Applies priority preferences for the channels Android ENFORCES: calls and SMS.
+   * WhatsApp is absent by design — no public API can enforce it (ADR-111).
+   */
+  dndSetPriority(
+    allowStarred: boolean,
+    allowRepeatCallers: boolean,
+    allowMessages: boolean,
+  ): Record<string, unknown>;
   dndPolicySnapshot(): Record<string, unknown>;
 
   // Brightness (T4). Percent is the contract currency; raw values prove exact restoration.

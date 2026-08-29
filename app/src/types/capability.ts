@@ -42,6 +42,69 @@ export const CAPABILITY_DOMAIN: Record<
   ringer: { kind: 'enum', values: RINGER_MODES },
 };
 
+/**
+ * Communication channels a priority preference can apply to.
+ *
+ * ENFORCEMENT DIFFERS BY CHANNEL and the UI must say so (ADR-111):
+ *   calls    Android enforces, via NotificationManager.Policy PRIORITY_CATEGORY_CALLS
+ *   sms      Android enforces, via PRIORITY_CATEGORY_MESSAGES
+ *   whatsapp Ally REMEMBERS ONLY. No public API lets one app grant another app's
+ *            notifications a DND bypass. Android 16 has per-app bypass internally
+ *            (`mAppBypassDndList`) but it is not in the public SDK.
+ *
+ * Calls and SMS are further limited to Android's sender SCOPES — starred contacts,
+ * all contacts, or anyone. There is no per-individual-contact DND exception for apps.
+ */
+export const CHANNELS = ['calls', 'sms', 'whatsapp'] as const;
+export type Channel = (typeof CHANNELS)[number];
+
+/** The granularity Android actually offers. Not per-contact. */
+export const SENDER_SCOPES = ['starred', 'contacts', 'anyone'] as const;
+export type SenderScope = (typeof SENDER_SCOPES)[number];
+
+/** Which channels the device can actually enforce, as opposed to merely remember. */
+export const CHANNEL_ENFORCEABLE: Record<Channel, boolean> = {
+  calls: true,
+  sms: true,
+  whatsapp: false,
+};
+
+/**
+ * What actually happened to a channel's priority preference (ADR-113).
+ *
+ * The four states exist because "we saved your setting" and "your phone will behave
+ * differently" are genuinely different promises, and collapsing them is how a product
+ * ends up lying to its user:
+ *
+ *   enforced        Applied to Android AND confirmed by reading the policy back.
+ *   preference_only Ally remembers it; Android exposes no way to act on it. WhatsApp.
+ *   unsupported     The device or API level cannot do this at all.
+ *   failed          We attempted it and Android did not hold the change.
+ */
+export const ENFORCEMENT_STATUSES = [
+  'enforced',
+  'preference_only',
+  'unsupported',
+  'failed',
+] as const;
+export type EnforcementStatus = (typeof ENFORCEMENT_STATUSES)[number];
+
+export interface ChannelEnforcement {
+  channel: Channel;
+  status: EnforcementStatus;
+  /** Plain language for the user. Never API jargon. */
+  message: string;
+}
+
+/** UI copy per status, so screens cannot invent their own wording. */
+export const ENFORCEMENT_PRESENTATION: Record<EnforcementStatus, { label: string; tone: string }> =
+  {
+    enforced: { label: 'Active on your phone', tone: 'success' },
+    preference_only: { label: 'Remembered, not enforced', tone: 'warning' },
+    unsupported: { label: 'Not supported on this device', tone: 'neutral' },
+    failed: { label: 'Failed', tone: 'danger' },
+  };
+
 /** Android permission a capability needs before it may execute (SRS FR-12). */
 export interface PermissionRequirement {
   /** Stable key used by the Permissions screen and PermissionState rows. */

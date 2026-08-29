@@ -7,7 +7,7 @@
  * The AI's only job is to emit a valid Intent. It never touches an Android API.
  */
 
-import type { Capability, CapabilityValue } from './capability';
+import type { Capability, CapabilityValue, Channel } from './capability';
 
 export const ACTIVITIES = ['study', 'sleep', 'unknown'] as const;
 export type Activity = (typeof ACTIVITIES)[number];
@@ -37,6 +37,12 @@ export interface RequestedChange {
 
 export interface IntentException {
   type: 'contact' | 'contactGroup';
+  /**
+   * Which channel the exception applies to. Optional and backward compatible —
+   * absent means "calls", which is what every existing golden command means.
+   * Lets the parser distinguish "let Mom CALL me" from "let Mom MESSAGE me".
+   */
+  channel?: Channel;
   /** Raw subject as the user said it: "parents", "Mom", "project group". */
   value: string;
   effect: 'allow' | 'block';

@@ -23,10 +23,65 @@ import android.provider.CallLog
  * FAILS CONSERVATIVELY: without READ_CALL_LOG, or if the query fails, it reports that plainly.
  * It never guesses, never fabricates a count, and never touches DND policy.
  */
+/**
+ * One inbound call attempt, stripped of ContentResolver so the rule can be tested on the JVM.
+ * `callerId` is null when the number was withheld/unknown.
+ */
+data class CallRecord(val callerId: String?, val timestampMs: Long, val displayName: String? = null)
+
 object CallLogAnalyzer {
 
   const val THRESHOLD = 4
   const val WINDOW_MS = 10 * 60 * 1000L
+
+  /**
+   * THE RULE, as a pure function. No Android dependency, so Tests 1-6 run on the JVM.
+   *
+   * 4 or more calls from the SAME caller inside a rolling window ending at `nowMs`.
+   * Records outside the window are dropped, so old calls age out rather than counting forever.
+   * Withheld callers are counted but never merged into one identity.
+   */
+  fun evaluate(records: List<CallRecord>, nowMs: Long): Map<String, Any?> {
+    val since = nowMs - WINDOW_MS
+    val inWindow = records.filter { it.timestampMs >= since && it.timestampMs <= nowMs }
+
+    val counts = LinkedHashMap<String, Int>()
+    val names = LinkedHashMap<String, String?>()
+    var unidentified = 0
+
+    for (r in inWindow) {
+      val id = r.callerId
+      if (id.isNullOrBlank()) {
+        unidentified++
+        continue
+      }
+      counts[id] = (counts[id] ?: 0) + 1
+      if (r.displayName != null) names[id] = r.displayName
+    }
+
+    val callers = counts.entries
+      .sortedByDescending { it.value }
+      .map {
+        mapOf(
+          "id" to it.key,
+          "name" to names[it.key],
+          "count" to it.value,
+          "qualifies" to (it.value >= THRESHOLD),
+        )
+      }
+
+    return mapOf(
+      "ok" to true,
+      "reason" to null,
+      "thresholdMet" to callers.any { it["qualifies"] == true },
+      "qualifyingCallers" to callers.filter { it["qualifies"] == true }.map { it["id"] },
+      "callers" to callers,
+      "unidentifiedCalls" to unidentified,
+      "windowMinutes" to (WINDOW_MS / 60000),
+      "threshold" to THRESHOLD,
+      "message" to buildMessage(callers, unidentified),
+    )
+  }
 
   fun hasPermission(context: Context): Boolean =
     context.checkSelfPermission(Manifest.permission.READ_CALL_LOG) ==
@@ -54,9 +109,7 @@ object CallLogAnalyzer {
     }
 
     val since = nowMs - WINDOW_MS
-    val counts = LinkedHashMap<String, Int>()
-    val names = LinkedHashMap<String, String?>()
-    var unidentified = 0
+    val records = ArrayList<CallRecord>()
 
     return try {
       context.contentResolver.query(
@@ -67,6 +120,7 @@ object CallLogAnalyzer {
         "${CallLog.Calls.DATE} DESC",
       )?.use { c ->
         val numIdx = c.getColumnIndexOrThrow(CallLog.Calls.NUMBER)
+        val dateIdx = c.getColumnIndexOrThrow(CallLog.Calls.DATE)
         val typeIdx = c.getColumnIndexOrThrow(CallLog.Calls.TYPE)
         val nameIdx = c.getColumnIndexOrThrow(CallLog.Calls.CACHED_NAME)
 
@@ -79,14 +133,10 @@ object CallLogAnalyzer {
           if (!inbound) continue
 
           val raw = c.getString(numIdx)?.trim().orEmpty()
-          if (raw.isEmpty() || raw == "-1" || raw == "-2" || raw == "-3") {
-            // Withheld / unknown / payphone. Never merged into a single identity.
-            unidentified++
-            continue
-          }
-          val key = normalise(raw)
-          counts[key] = (counts[key] ?: 0) + 1
-          if (c.getString(nameIdx) != null) names[key] = c.getString(nameIdx)
+          // Withheld / unknown / payphone. Passed through as null so evaluate() counts
+          // them as unidentified rather than merging them into a single caller.
+          val id = if (raw.isEmpty() || raw == "-1" || raw == "-2" || raw == "-3") null else normalise(raw)
+          records.add(CallRecord(id, c.getLong(dateIdx), c.getString(nameIdx)))
         }
       } ?: return mapOf(
         "ok" to false,
@@ -96,28 +146,7 @@ object CallLogAnalyzer {
         "callers" to emptyList<Map<String, Any?>>(),
       )
 
-      val callers = counts.entries
-        .sortedByDescending { it.value }
-        .map {
-          mapOf(
-            "id" to it.key,
-            "name" to names[it.key],
-            "count" to it.value,
-            "qualifies" to (it.value >= THRESHOLD),
-          )
-        }
-
-      mapOf(
-        "ok" to true,
-        "reason" to null,
-        "thresholdMet" to callers.any { it["qualifies"] == true },
-        "qualifyingCallers" to callers.filter { it["qualifies"] == true }.map { it["id"] },
-        "callers" to callers,
-        "unidentifiedCalls" to unidentified,
-        "windowMinutes" to (WINDOW_MS / 60000),
-        "threshold" to THRESHOLD,
-        "message" to buildMessage(callers, unidentified),
-      )
+      evaluate(records, nowMs)
     } catch (t: Throwable) {
       mapOf(
         "ok" to false,
