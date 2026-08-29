@@ -296,6 +296,56 @@ These cannot be proven by API read-back and are explicitly NOT marked passing:
 - [ ] Two callers with 2 calls each → neither qualifies, counts not merged
 - [ ] End the context → original DND filter, policy and brightness all restored
 
+
+## Priority channels — what Android enforces, verified against the API 36 SDK
+
+Checked with `javap -cp android.jar 'android.app.NotificationManager$Policy'`, not assumed.
+
+```
+categories: ALARMS CALLS CONVERSATIONS EVENTS MEDIA MESSAGES REMINDERS REPEAT_CALLERS SYSTEM
+senders:    ANY  CONTACTS  STARRED
+ctors:      (int,int,int) (int,int,int,int) (int,int,int,int,int)
+```
+
+| Channel | Enforced? | Mechanism |
+|---|---|---|
+| **Calls** | **YES** | `PRIORITY_CATEGORY_CALLS` + `PRIORITY_SENDERS_STARRED` |
+| **SMS** | **YES** | `PRIORITY_CATEGORY_MESSAGES` + `PRIORITY_SENDERS_STARRED` |
+| **WhatsApp** | **NO — remembered only** | No public API grants another app's notifications a DND bypass |
+| Repeat callers | YES (Android's rule) | `PRIORITY_CATEGORY_REPEAT_CALLERS`, 15-min system window |
+
+**Two limits the UI must state, not hide:**
+
+1. **No per-individual-contact exception exists.** Android offers starred / all contacts /
+   anyone — nothing finer. "Mom" means "a starred contact", so the demo contact must actually
+   be starred or nothing fires.
+2. **WhatsApp cannot be enforced.** Android 16 *does* have per-app bypass (`mAppBypassDndList`)
+   and per-contact exceptions (`mExceptionContacts`) — both visible in `dumpsys notification` —
+   but `javap` confirms neither is in the public SDK. So close, and unavailable.
+
+## Emergency rule — JVM unit tests
+
+`CallLogAnalyzer.evaluate()` is a pure function over `List<CallRecord>` and a clock, so the rule
+is tested without a device or ContentResolver. `./gradlew :ally-native:testDebugUnitTest` —
+**8 tests, 0 failures**:
+
+| Test | Scenario | Expected |
+|---|---|---|
+| 1 | 1 call | not met |
+| 2 | 3 calls in window | not met (threshold is **more than** 3) |
+| 3 | 4 calls in window | **met** |
+| 4 | 4 calls, oldest 11 min back | not met — it aged out |
+| 5 | 2 callers x 2 calls | not met, counts never pooled |
+| 6 | 4 withheld numbers | not met, never merged into one identity |
+| + | qualifying caller alongside another | only the qualifying one flagged |
+| + | exactly on the window edge | inclusive; 1 ms older is excluded |
+
+Test 4 is the one that fails if anyone ever swaps the rolling window for "calls today".
+
+**Detection and ringing stay separate (ADR-109):** Ally detects 4-in-10 and reports it. Ringing
+for persistent callers is Android's own `PRIORITY_CATEGORY_REPEAT_CALLERS` on its 15-minute
+rule. Emergency classification is contextual and never writes to the user's priority list.
+
 ### Still to check before the demo
 
 - [ ] Run `DndProbe` on the actual iQOO and fill in the column above

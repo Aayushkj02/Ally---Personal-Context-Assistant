@@ -15,6 +15,7 @@ import {
   getNativeDeviceInfo,
   runDndProbe,
   setPriorityCallers,
+  applyPriorityPreferences,
   analyseCallLog,
 } from './AllyNative';
 import { mockRegistry } from './MockDevice';
@@ -23,4 +24,11 @@ export const device: DeviceRegistry = createNativeRegistry() ?? mockRegistry;
 
 export const isMockBackend = device.backend === 'mock';
 
-export { getNativeDeviceInfo, runDndProbe, setPriorityCallers, analyseCallLog, mockRegistry };
+export {
+  getNativeDeviceInfo,
+  runDndProbe,
+  setPriorityCallers,
+  applyPriorityPreferences,
+  analyseCallLog,
+  mockRegistry,
+};

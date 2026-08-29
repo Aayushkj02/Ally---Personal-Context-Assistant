@@ -126,6 +126,14 @@ class AllyNativeModule : Module() {
       DndController.setPriorityCallers(context, allowStarred, allowRepeatCallers)
     }
 
+    /**
+     * Applies priority preferences for the channels Android enforces: calls and SMS.
+     * WhatsApp is deliberately absent — no public API can enforce it (ADR-111).
+     */
+    Function("dndSetPriority") { allowStarred: Boolean, allowRepeatCallers: Boolean, allowMessages: Boolean ->
+      DndController.setPriority(context, allowStarred, allowRepeatCallers, allowMessages)
+    }
+
     /** The user's original notification policy, for durable persistence by the data layer. */
     Function("dndPolicySnapshot") { DndController.policySnapshot(context) }
 

@@ -44,6 +44,23 @@ export function runDndProbe(): Record<string, unknown> | null {
   return AllyNative ? AllyNative.dndProbe() : null;
 }
 
+/**
+ * Applies the priority preferences Android can actually enforce.
+ *
+ * `whatsapp` is accepted so callers can pass a whole preference set, but it is NEVER sent to
+ * Android — no public API grants another app's notifications a DND bypass. The returned
+ * `whatsappEnforceable: false` is what the UI must surface (ADR-111).
+ */
+export function applyPriorityPreferences(prefs: {
+  calls: boolean;
+  sms: boolean;
+  whatsapp?: boolean;
+  repeatCallers?: boolean;
+}): Record<string, unknown> | null {
+  if (!AllyNative) return null;
+  return AllyNative.dndSetPriority(prefs.calls, prefs.repeatCallers ?? true, prefs.sms);
+}
+
 /** Priority-caller exception + Android's repeat-caller bypass (ADR-107). */
 export function setPriorityCallers(
   allowStarred: boolean,

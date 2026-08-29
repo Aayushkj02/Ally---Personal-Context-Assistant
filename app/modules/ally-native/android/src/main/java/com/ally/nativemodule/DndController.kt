@@ -84,7 +84,29 @@ object DndController {
    * "Parents" therefore means STARRED CONTACTS — Android exposes no per-contact DND exception
    * to apps. See ADR-107.
    */
-  fun setPriorityCallers(context: Context, allowStarred: Boolean, allowRepeatCallers: Boolean): Map<String, Any?> {
+  fun setPriorityCallers(context: Context, allowStarred: Boolean, allowRepeatCallers: Boolean): Map<String, Any?> =
+    setPriority(context, allowStarred, allowRepeatCallers, allowMessages = false)
+
+  /**
+   * Applies the user's priority preferences for the channels Android can actually enforce.
+   *
+   * ENFORCEABLE: calls (PRIORITY_CATEGORY_CALLS) and SMS (PRIORITY_CATEGORY_MESSAGES), each
+   * scoped to starred contacts. Confirmed against the API 36 SDK.
+   *
+   * NOT ENFORCEABLE: WhatsApp, or any other app's notifications. No public API lets one app
+   * grant another app's notifications a DND bypass. Android 16 has per-app bypass internally
+   * (`mAppBypassDndList`) but it is absent from the public SDK — verified with javap. WhatsApp
+   * preferences are remembered by Ally and must be shown as such (ADR-111).
+   *
+   * There is also no per-INDIVIDUAL-contact exception: Android offers starred / contacts /
+   * anyone, nothing finer. "Mom" therefore means "a starred contact".
+   */
+  fun setPriority(
+    context: Context,
+    allowStarred: Boolean,
+    allowRepeatCallers: Boolean,
+    allowMessages: Boolean,
+  ): Map<String, Any?> {
     val manager = nm(context)
     if (!manager.isNotificationPolicyAccessGranted) {
       return mapOf(
@@ -97,13 +119,14 @@ object DndController {
       var categories = 0
       if (allowStarred) categories = categories or NotificationManager.Policy.PRIORITY_CATEGORY_CALLS
       if (allowRepeatCallers) categories = categories or NotificationManager.Policy.PRIORITY_CATEGORY_REPEAT_CALLERS
+      if (allowMessages) categories = categories or NotificationManager.Policy.PRIORITY_CATEGORY_MESSAGES
       // Alarms stay allowed — silencing a context must never kill the user's alarm.
       categories = categories or NotificationManager.Policy.PRIORITY_CATEGORY_ALARMS
 
       manager.notificationPolicy = NotificationManager.Policy(
         categories,
         if (allowStarred) NotificationManager.Policy.PRIORITY_SENDERS_STARRED else 0,
-        0,
+        if (allowMessages) NotificationManager.Policy.PRIORITY_SENDERS_STARRED else 0,
       )
       Thread.sleep(250)
 
@@ -114,18 +137,27 @@ object DndController {
         (after.priorityCategories and NotificationManager.Policy.PRIORITY_CATEGORY_REPEAT_CALLERS) != 0
       val starredHeld = !allowStarred ||
         after.priorityCallSenders == NotificationManager.Policy.PRIORITY_SENDERS_STARRED
+      val messagesHeld = !allowMessages ||
+        ((after.priorityCategories and NotificationManager.Policy.PRIORITY_CATEGORY_MESSAGES) != 0 &&
+          after.priorityMessageSenders == NotificationManager.Policy.PRIORITY_SENDERS_STARRED)
 
+      val ok = callsHeld && repeatHeld && starredHeld && messagesHeld
       mapOf(
-        "ok" to (callsHeld && repeatHeld && starredHeld),
-        "reason" to if (callsHeld && repeatHeld && starredHeld) null else "mismatch",
+        "ok" to ok,
+        "reason" to if (ok) null else "mismatch",
         "starredCallsAllowed" to callsHeld,
         "repeatCallersAllowed" to repeatHeld,
         "starredSenderScope" to starredHeld,
+        "starredMessagesAllowed" to messagesHeld,
+        // WhatsApp is remembered by Ally, never enforced here. Stated so callers cannot
+        // mistake the absence of an error for enforcement.
+        "whatsappEnforceable" to false,
         "savedOriginal" to describe(savedPolicy),
-        "message" to if (callsHeld && repeatHeld && starredHeld) {
-          "Starred contacts and repeat callers can reach you."
+        "message" to if (ok) {
+          "Starred contacts" + (if (allowMessages) " (calls and messages)" else " (calls)") +
+            " and repeat callers can reach you."
         } else {
-          "Android did not hold the requested priority-caller policy."
+          "Android did not hold the requested priority policy."
         },
       )
     } catch (t: Throwable) {
