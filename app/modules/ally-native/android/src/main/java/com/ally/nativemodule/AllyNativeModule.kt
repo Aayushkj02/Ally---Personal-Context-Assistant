@@ -17,14 +17,17 @@ import expo.modules.kotlin.modules.ModuleDefinition
  * ONE module for every Android capability (ADR-101). Keep this surface small and
  * auditable: it is the only code in Ally allowed to touch the device.
  *
- * T2 deliberately implements only what is READ-ONLY or navigational:
- *   - device info, so JS can prove the native backend is really live
- *   - honest permission status
- *   - opening the correct settings screen
+ * Read-only and navigational surface: device info, honest permission status, and
+ * opening the correct settings screen.
  *
- * Capability MUTATION (DND in T3, brightness in T4, alarms in T5) is not here yet.
- * The TypeScript adapter reports those as `not_supported` until they land, because a
- * truthful "not supported" beats a fake success (PRD 20, NFR-03).
+ * Capability MUTATION lives in a controller per capability, so this file stays small
+ * enough to audit before the demo:
+ *   - DND (T3)        -> DndController
+ *   - brightness (T4) -> not implemented yet
+ *   - alarms (T5)     -> not implemented yet
+ *
+ * Anything not yet implemented is reported as `not_supported` by the TypeScript adapter,
+ * because a truthful "not supported" beats a fake success (PRD 20, NFR-03).
  */
 class AllyNativeModule : Module() {
 
@@ -97,6 +100,19 @@ class AllyNativeModule : Module() {
       context.startActivity(intent)
       true
     }
+
+    // ---- DND (T3) — see DndController for why this uses AutomaticZenRule ----
+
+    Function("dndIsAvailable") { DndController.isAvailable(context) }
+
+    /** Effective device-wide mode. May reflect Zen rules other than ours. */
+    Function("dndGetMode") { DndController.currentMode(context) }
+
+    /** Applies a mode and reports what the device ACTUALLY did, after a read-back. */
+    Function("dndApply") { mode: String -> DndController.apply(context, mode) }
+
+    /** Diagnostics for the T3 spike and docs/DEVICE_NOTES.md. */
+    Function("dndDebugState") { DndController.debugState(context) }
   }
 
   private fun appDetailsIntent(): Intent =

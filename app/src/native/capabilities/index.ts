@@ -3,9 +3,9 @@
  *
  * Real, native-backed DeviceCapability implementations.
  *
- * T2 STATE: the boundary exists, permission reporting is REAL, but no capability
- * mutates the device yet. Each one is a `pendingCapability` that answers
- * `isAvailable() === false` and returns `not_supported` from execute/restore.
+ * STATE: DND is implemented (T3). Brightness (T4) and alarm (T5) are still
+ * `pendingCapability` — they answer `isAvailable() === false` and return
+ * `not_supported` from execute/restore.
  *
  * That is deliberate and is the whole point of the architecture: an unimplemented
  * capability must say so out loud. A truthful "not supported on this device" scores
@@ -25,6 +25,7 @@ import type {
 } from '../../types';
 import type { AllyNativeSpec } from '../../../modules/ally-native';
 import { describePermission } from '../permissions';
+import { createDndCapability } from './DndCapability';
 
 /**
  * A capability whose native implementation has not landed yet.
@@ -72,9 +73,10 @@ export function createNativeCapabilities(
   native: AllyNativeSpec,
 ): Record<Capability, DeviceCapability> {
   return {
-    dnd: pendingCapability('dnd', 'notification_policy', native, 'T3'),
+    dnd: createDndCapability(native),
     brightness: pendingCapability('brightness', 'write_settings', native, 'T4'),
-    ringer: pendingCapability('ringer', 'notification_policy', native, 'T3'),
+    // Ringer is a separate capability from DND and is not part of T3.
+    ringer: pendingCapability('ringer', 'notification_policy', native, 'T5'),
     alarm: pendingCapability('alarm', 'exact_alarm', native, 'T5'),
   };
 }

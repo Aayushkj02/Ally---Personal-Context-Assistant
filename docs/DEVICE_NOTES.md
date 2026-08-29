@@ -86,6 +86,13 @@ evidence the device received anything*. Before concluding Fast Refresh is broken
 `host.exp.exponent` you are looking at Expo Go, not our build. Then relaunch the app so it
 reconnects, and re-test.
 
+**Metro wedges when `expo prebuild` runs.** Regenerating `android/` drops thousands of files
+under the project root and Metro's crawler chokes: it keeps listening on 8081 and answering
+`/status`, but every bundle request times out, presenting on device as a permanent white screen
+that looks like an app crash. Fixed by `app/metro.config.js`, which excludes `android/` and
+`ios/` from the crawler (plus `.watchmanconfig`). Bundle now serves in ~6.5 s where it
+previously timed out at 90 s.
+
 **Port 8081 must be free before starting Metro.** `npx expo start` is non-interactive here and
 exits with `Input is required` rather than prompting to use another port.
 
@@ -99,9 +106,58 @@ the ones that failed — a documented failure saves the next person two hours.
 
 | # | Approach | Result | Notes |
 |---|---|---|---|
-| 1 | `AutomaticZenRule` + `ZenPolicy` via `NotificationManager`, targetSdk 35+ | ⬜ untested | |
-| 2 | `targetSdkVersion = 34` + `setInterruptionFilter()` + `ACCESS_NOTIFICATION_POLICY` | ⬜ untested | Escape hatch; legitimate for a sideloaded APK |
-| 3 | `AudioManager.setRingerMode(RINGER_MODE_SILENT)` | ⬜ untested | Visible-effect floor only |
+| 1 | `AutomaticZenRule` + `ZenPolicy` via `NotificationManager`, targetSdk 36 | ❌ **REJECTED by One UI** | Three attempts, see below. Kept first in the ladder — an iQOO may accept it |
+| 2 | `setInterruptionFilter()` + `ACCESS_NOTIFICATION_POLICY` | ✅ **WORKS — and at targetSdk 36** | **No need to drop to 34.** This is what ships. ADR-105 |
+| 3 | `AudioManager.setRingerMode(RINGER_MODE_SILENT)` | not needed | Rung 2 was sufficient |
+
+### Why rung 1 fails (three attempts, in order)
+
+1. `addAutomaticZenRule()` → `"Rule must have a ConditionProviderService and/or configuration activity"`.
+   Android requires every zen rule to name an owner service or a config activity.
+2. Added `setConfigurationActivity(MainActivity)` → `"Lacking enabled CPS or config activity"`.
+3. Discovered Expo's `android.intentFilters` **prepends `android.intent.action.`**, so our entry
+   had registered as `android.intent.action.android.app.action.AUTOMATIC_ZEN_RULE_SETTINGS` — a
+   valid-looking action matching nothing. Replaced it with a config plugin
+   (`plugins/withZenRuleIntentFilter.js`); verified with
+   `adb shell cmd package query-activities -a android.app.action.AUTOMATIC_ZEN_RULE_SETTINGS`
+   that MainActivity now resolves. **The error persisted unchanged.**
+
+One UI rejects an app-owned zen rule that satisfies the documented AOSP contract. Rung 2 works
+immediately. Do not spend more time on rung 1 unless the iQOO behaves differently.
+
+### Verified DND results — SM-S928B, Android 16, targetSdk 36
+
+`zen_mode` read with `adb shell settings get global zen_mode` (0=off 1=priority 2=silence 3=alarms).
+
+| Action | Reported | `zen_mode` | Rung |
+|---|---|---|---|
+| Priority | `Applied` off → priority | **1** | interruption_filter |
+| Alarms only | `Applied` | **3** | interruption_filter |
+| Silence | `Applied` | **2** | interruption_filter |
+| Off | `Applied` priority → off | **0** | interruption_filter |
+| Priority ×3 repeated | stable | 1, 1, 1 | idempotent |
+| **Permission revoked** | `Permission needed` off → off | **0 — unchanged** | none, no write attempted |
+| **Rule rejected (rung 1 era)** | `Failed`, verbatim platform reason | **0 — unchanged** | none |
+
+DND icon appears in the status bar on activation and clears on `off`.
+
+**Five distinct failure modes were exercised** — permission denied, missing config activity,
+unresolvable action, OEM refusal, and a silent no-op — and **not one produced a partial device
+mutation**. That is PRD §20 / NFR-03 demonstrated, not asserted.
+
+### Bug this spike caught in our own code (ADR-106)
+
+`off` did not turn DND off. Deactivating a zen rule that was never registered is a silent no-op
+that throws nothing, so rung 1 "succeeded" and the ladder short-circuited before rung 2 ran. The
+phone stayed in Total Silence while the app truthfully reported a mismatch. Fixed: **a rung only
+counts as working if the read-back confirms the device reached the target.**
+
+### Still to check before the demo
+
+- [ ] **`ZenPolicy` priority-caller exception is a rung-1 feature.** On rung 2 the device's own
+      DND priority-caller settings apply. The "let my parents call me" demo moment depends on
+      this — verify what One UI/OriginOS actually allows through before relying on it.
+- [ ] Re-run this entire table on the iQOO. Samsung results do not transfer.
 
 **Checks for whichever rung wins:**
 
@@ -113,7 +169,7 @@ the ones that failed — a documented failure saves the next person two hours.
 - [ ] Behaviour is identical on the second and third activation (no drift)
 - [ ] `isAvailable()` reports honestly when the rung is unsupported
 
-**Outcome:** _(record here, then write the confirming ADR in the 1xx range)_
+**Outcome:** rung 2 (`setInterruptionFilter`) at targetSdk 36. See ADR-105 and ADR-106.
 
 ## Brightness
 
