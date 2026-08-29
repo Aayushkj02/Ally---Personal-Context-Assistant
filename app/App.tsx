@@ -14,7 +14,7 @@ import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import type { ActionResult, CapabilityValue, DndMode } from './src/types';
 import { STATUS_PRESENTATION } from './src/types';
-import { device, getNativeDeviceInfo } from './src/native';
+import { device, getNativeDeviceInfo, runDndProbe } from './src/native';
 
 const DND_TESTS: { label: string; value: DndMode }[] = [
   { label: 'Priority', value: 'priority' },
@@ -39,6 +39,7 @@ export default function App() {
   const [available, setAvailable] = useState<boolean | null>(null);
   const [granted, setGranted] = useState<boolean | null>(null);
   const [log, setLog] = useState<ActionResult[]>([]);
+  const [probe, setProbe] = useState<Record<string, unknown> | null>(null);
 
   const refresh = useCallback(async () => {
     setAvailable(await dnd.isAvailable());
@@ -99,6 +100,23 @@ export default function App() {
         <Text style={styles.btnText}>Grant DND access</Text>
       </Pressable>
 
+      <Pressable style={[styles.btn, styles.btnProbe]} onPress={() => setProbe(runDndProbe())}>
+        <Text style={styles.btnText}>Run device probe</Text>
+      </Pressable>
+
+      {probe ? (
+        <View style={styles.probeBox}>
+          <Text style={styles.probeVerdict}>{String(probe.verdict)}</Text>
+          {Object.entries(probe)
+            .filter(([k]) => k !== 'verdict')
+            .map(([k, v]) => (
+              <Text key={k} style={styles.probeRow}>
+                {k}: <Text style={styles.strong}>{String(v)}</Text>
+              </Text>
+            ))}
+        </View>
+      ) : null}
+
       {log.map((r, i) => (
         <View key={i} style={styles.result}>
           <View
@@ -133,6 +151,10 @@ const styles = StyleSheet.create({
   row: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 6 },
   btn: { backgroundColor: '#232A35', paddingHorizontal: 14, paddingVertical: 10, borderRadius: 8 },
   btnWide: { alignSelf: 'flex-start', marginTop: 4 },
+  btnProbe: { backgroundColor: '#1F3A5F' },
+  probeBox: { marginTop: 12, padding: 12, borderRadius: 8, backgroundColor: '#161C26', gap: 3 },
+  probeVerdict: { color: '#F5F7FA', fontSize: 14, fontWeight: '700', marginBottom: 6 },
+  probeRow: { color: '#9AA4B2', fontSize: 12 },
   btnText: { color: '#F5F7FA', fontSize: 13, fontWeight: '600' },
   result: { marginTop: 10, gap: 3 },
   pill: { alignSelf: 'flex-start', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 999 },

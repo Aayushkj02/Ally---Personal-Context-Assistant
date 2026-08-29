@@ -152,12 +152,73 @@ that throws nothing, so rung 1 "succeeded" and the ladder short-circuited before
 phone stayed in Total Silence while the app truthfully reported a mismatch. Fixed: **a rung only
 counts as working if the read-back confirms the device reached the target.**
 
+## Demo-device compatibility spike
+
+### How to characterise any device in one tap
+
+Install the dev build, grant DND access, tap **Run device probe**. `DndProbe.kt` (ADR-108)
+reports which rung works, whether `AutomaticZenRule`/`ZenPolicy` are accepted, and whether the
+priority-caller exception is expressible. It reverts everything it touches — including the
+original interruption filter and notification policy — so it is safe on a phone in use.
+
+### Probe baseline — Samsung SM-S928B, Android 16, targetSdk 36 (2026-08-29)
+
+```
+VERDICT: rung 2 (setInterruptionFilter) · priority-caller demo POSSIBLE
+
+permissionGranted           true
+currentFilter               1        (INTERRUPTION_FILTER_ALL — note: NOT the same
+                                      constants as the zen_mode global setting)
+zenRuleAccepted             false    "Lacking enabled CPS or config activity"
+zenPolicyPreserved          false
+interruptionFilterWorks     true
+readPolicyWorks             true
+originalPriorityCategories  96
+originalCallSenders         2
+priorityCallersExpressible  TRUE
+callsCategoryHeld           TRUE
+starredSenderScopeHeld      TRUE
+priorityCallerError         null
+```
+
+### The priority-caller demo IS possible — via a different API (ADR-107)
+
+`ZenPolicy` only attaches to an `AutomaticZenRule`, so on rung 2 it is unavailable. But
+`NotificationManager.setNotificationPolicy()` with `PRIORITY_CATEGORY_CALLS` +
+`PRIORITY_SENDERS_STARRED` works, verified on device. **"Let my parents call me" is achievable
+on the rung we actually ship.**
+
+Two consequences for the product:
+
+- **"Parents" maps to starred contacts.** Android does not expose per-contact DND exceptions to
+  apps, so whoever must ring through has to be starred in the device's contacts. The intent
+  layer and the demo script both need to respect this.
+- **Ally must snapshot and restore `NotificationManager.Policy`**, exactly as it does the
+  interruption filter. The probe records `originalPriorityCategories` and `originalCallSenders`
+  precisely so this is not forgotten.
+
+### ⚠ NOT YET VERIFIED ON THE iQOO
+
+Everything above is the **Samsung SM-S928B**. The iQOO demo device was not available
+(`adb devices` showed only `R5CY31SNAHK`). Rung 1 may well work on OriginOS, which would
+restore `ZenPolicy` and give a cleaner implementation for free — the ladder already tries it
+first, so no code change would be needed.
+
+**Run the probe on the iQOO before building the demo script around any of this.**
+
+| Question | Samsung answer | iQOO |
+|---|---|---|
+| Which rung works? | rung 2 | ⬜ |
+| `AutomaticZenRule` accepted? | no | ⬜ |
+| `ZenPolicy` preserved? | no | ⬜ |
+| Priority-caller expressible? | **yes**, via `NotificationManager.Policy` | ⬜ |
+| Permission-denied safe? | yes, no mutation | ⬜ |
+
 ### Still to check before the demo
 
-- [ ] **`ZenPolicy` priority-caller exception is a rung-1 feature.** On rung 2 the device's own
-      DND priority-caller settings apply. The "let my parents call me" demo moment depends on
-      this — verify what One UI/OriginOS actually allows through before relying on it.
-- [ ] Re-run this entire table on the iQOO. Samsung results do not transfer.
+- [ ] Run `DndProbe` on the actual iQOO and fill in the column above
+- [ ] Star the "parent" contact used in the demo, or the exception will not fire
+- [ ] Confirm a real call from a starred contact rings through while DND is active
 
 **Checks for whichever rung wins:**
 
