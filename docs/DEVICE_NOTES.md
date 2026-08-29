@@ -10,8 +10,35 @@ the most visible moment of the demo and is a P0 risk in both the PRD (§28) and 
 
 | Role | Device | Android | OEM skin | Notes |
 |---|---|---|---|---|
-| Primary dev/test | *(Aayush's)* | **16** | | Confirmed available |
+| Primary dev/test | **Samsung SM-S928B** (Galaxy S24 Ultra) | **16 (API 36)** | One UI | Confirmed 2026-08-29 via Metro inspector |
 | Demo target | iQOO *(model TBC)* | **unknown** | OriginOS / FuntouchOS | **Confirm before Phase 5** — PRD §30 open question |
+
+> **The dev device is a Samsung, the demo device is an iQOO.** DND and brightness
+> behaviour is OEM-specific, so T3/T4 results verified on One UI do **not** transfer
+> to OriginOS unchanged. Every finding below must be re-run on the iQOO before the
+> demo. Treat Samsung results as "works on at least one Android 16 device", not as proof.
+
+## Build environment (2026-08-29)
+
+| Item | Value |
+|---|---|
+| Java on PATH | JDK **26** — **AGP rejects this** |
+| `JAVA_HOME` | JDK 17.0.19 (Microsoft) — correct, Gradle uses this |
+| Fallback JDK | Android Studio JBR 21 |
+| Android SDK | platforms 34 / 36 / 36.1 · build-tools 35–37 · NDK 27.1 |
+| First native build | `assembleDebug` BUILD SUCCESSFUL in 5m, 427 tasks |
+| Gradle cache | ~7 GB warm after first build; rebuilds are much faster |
+
+Use `--no-daemon` for Gradle. A lingering daemon holds a lock on `android/` and makes
+`expo prebuild --clean` fail with `EBUSY: resource busy or locked`.
+
+## Expo Go is NOT a substitute for the dev build
+
+Confirmed 2026-08-29: scanning the Metro QR with **Expo Go** (`host.exp.exponent`)
+loads our JS over Wi-Fi and proves the bundle works, but it does **not** verify that
+our APK (`com.ally.assistant`) installs or launches, and **Expo Go cannot load the
+custom Kotlin module** added in T2. From T2 onward, Ally must run from the installed
+development build or it will not start at all.
 
 > Android 15+ restricts direct global DND control for apps **targeting** API 35+. Apps targeting ≤34
 > retain legacy behaviour even when running on a newer device. See ADR-102 for the ladder.
