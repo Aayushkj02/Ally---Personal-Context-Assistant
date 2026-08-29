@@ -49,6 +49,8 @@ export interface AllyNativeSpec {
   dndGetMode(): string;
   dndApply(mode: string): NativeApplyResult;
   dndDebugState(): Record<string, unknown>;
+  /** Demo-device compatibility probe. Reverts everything it touches. */
+  dndProbe(): Record<string, unknown>;
 }
 
 const AllyNative = requireOptionalNativeModule<AllyNativeSpec>('AllyNative');

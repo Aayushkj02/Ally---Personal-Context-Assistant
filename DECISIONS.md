@@ -293,3 +293,45 @@ Because entries never move and IDs never collide, a merge conflict here is alway
 - **Impact:** Generalises to T4 (brightness) and T5 (alarms): read-back is what decides
   success, not the absence of an exception. This is the same rule as PRD 20 / NFR-03 applied
   one level down, to rung selection rather than to user-facing status.
+
+### ADR-107 — Priority-caller exception via `NotificationManager.Policy`, not `ZenPolicy`
+- **Date:** 2026-08-29 · **Author:** Aayush · **Phase:** 1 · **Status:** Accepted
+- **Decision:** The demo's "keep me silent but let my parents through" moment is expressed with
+  `NotificationManager.setNotificationPolicy()` — `PRIORITY_CATEGORY_CALLS` plus a sender scope
+  such as `PRIORITY_SENDERS_STARRED` — and NOT with `ZenPolicy`.
+- **Reason:** ADR-105 established that we run on rung 2 because One UI rejects our
+  `AutomaticZenRule`. `ZenPolicy` only attaches to a zen rule, so on rung 2 it is simply not
+  available — which left the single most visceral moment in the demo unverified. A capability
+  probe on the SM-S928B shows the legacy policy API does the job: `priorityCallersExpressible`,
+  `callsCategoryHeld` and `starredSenderScopeHeld` all true, no error. The exception is
+  expressible on the rung we actually ship.
+- **Alternatives considered:** Make the demo depend on rung 1 — it does not work on the only
+  device we can test. Drop the priority-caller moment — it is the most persuasive 10 seconds of
+  the demo and answers "isn't this just Routines?" better than anything else. Contact-level
+  allow-listing beyond starred/contacts scope — Android does not expose per-contact DND
+  exceptions to apps, so "parents" maps onto the starred-contacts scope.
+- **Impact:** "Parents" is modelled as **starred contacts**, not an arbitrary named group. Whoever
+  should ring through must be starred in the device's contacts. That is a product constraint the
+  intent layer and the demo script both need to respect. Ally must also snapshot and restore the
+  user's original `NotificationManager.Policy`, exactly as it does the interruption filter — the
+  probe records `originalPriorityCategories` and `originalCallSenders` for this reason.
+- **Not yet verified on the iQOO.** The demo device was unavailable. `DndProbe` exists so this
+  is one tap to confirm.
+
+### ADR-108 — Ship a device capability probe rather than re-deriving OEM behaviour by hand
+- **Date:** 2026-08-29 · **Author:** Aayush · **Phase:** 1 · **Status:** Accepted
+- **Decision:** `DndProbe.kt` reports, in one call, which ADR-102 rung works, whether
+  `AutomaticZenRule` and `ZenPolicy` are accepted, and whether the priority-caller exception is
+  expressible. It reverts every mutation, including the original interruption filter and
+  notification policy, so it is safe to run on a phone in use.
+- **Reason:** Establishing rung 1 was unusable on One UI took three build-install-test cycles and
+  two subtly different platform error messages. Repeating that by hand on the iQOO — under
+  hackathon time pressure, possibly on the morning of the demo — is the kind of avoidable risk
+  worth twenty minutes now. OEM skins diverge from AOSP unpredictably; the probe turns a
+  multi-hour investigation into one tap.
+- **Alternatives considered:** Re-run the manual T3 sequence on each device — slow and easy to
+  get wrong under pressure. Trust that the iQOO behaves like the Samsung — precisely the
+  assumption that produced the rung-1 dead end.
+- **Impact:** Any new Android device is characterised in seconds. Also useful if the demo phone
+  is swapped at short notice. The probe is Phase 1 harness code and is removed with `App.tsx`
+  in Phase 2, but `DndProbe.kt` itself should stay.

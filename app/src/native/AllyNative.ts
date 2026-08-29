@@ -35,3 +35,11 @@ export function createNativeRegistry(): DeviceRegistry | null {
 export function getNativeDeviceInfo(): AllyNativeDeviceInfo | null {
   return AllyNative ? AllyNative.getDeviceInfo() : null;
 }
+
+/**
+ * Runs the demo-device compatibility probe, or returns null on the mock backend.
+ * Reports which ADR-102 rung works and whether the priority-caller demo is possible.
+ */
+export function runDndProbe(): Record<string, unknown> | null {
+  return AllyNative ? AllyNative.dndProbe() : null;
+}

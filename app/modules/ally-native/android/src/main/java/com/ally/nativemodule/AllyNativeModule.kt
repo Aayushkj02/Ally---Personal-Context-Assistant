@@ -113,6 +113,13 @@ class AllyNativeModule : Module() {
 
     /** Diagnostics for the T3 spike and docs/DEVICE_NOTES.md. */
     Function("dndDebugState") { DndController.debugState(context) }
+
+    /**
+     * Demo-device compatibility probe. Reports which ADR-102 rung works, whether
+     * AutomaticZenRule and ZenPolicy are accepted, and whether the priority-caller
+     * exception the demo depends on is expressible. Reverts everything it touches.
+     */
+    Function("dndProbe") { DndProbe.run(context) }
   }
 
   private fun appDetailsIntent(): Intent =

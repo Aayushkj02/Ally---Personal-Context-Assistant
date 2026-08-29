@@ -10,11 +10,11 @@
  */
 
 import type { DeviceRegistry } from '../types';
-import { createNativeRegistry, getNativeDeviceInfo } from './AllyNative';
+import { createNativeRegistry, getNativeDeviceInfo, runDndProbe } from './AllyNative';
 import { mockRegistry } from './MockDevice';
 
 export const device: DeviceRegistry = createNativeRegistry() ?? mockRegistry;
 
 export const isMockBackend = device.backend === 'mock';
 
-export { getNativeDeviceInfo, mockRegistry };
+export { getNativeDeviceInfo, runDndProbe, mockRegistry };
