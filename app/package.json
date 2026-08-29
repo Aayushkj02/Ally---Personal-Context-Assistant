@@ -26,8 +26,10 @@
     "expo": "^57.0.18",
     "expo-dev-client": "~57.0.16",
     "expo-splash-screen": "~57.0.8",
+    "expo-sqlite": "~57.0.2",
     "react": "19.2.3",
-    "react-native": "0.86.3"
+    "react-native": "0.86.3",
+    "zustand": "^5.0.15"
   },
   "main": "index.ts"
 }

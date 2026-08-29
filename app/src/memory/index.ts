@@ -1,8 +1,9 @@
 /**
- * OWNER: DHREY — task D1
+ * OWNER: DHREY
  *
  * PUBLIC SURFACE of the data layer. Screens and use cases import ONLY this file.
- * Seeds Study and Sleep on first run from src/modes/*.json (ADR-004).
  */
 
-export {};
+export { getDatabase, __resetDatabase } from './database';
+export { runMigrations, LATEST_VERSION } from './migrations';
+export * from './repositories';
