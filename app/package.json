@@ -2,15 +2,26 @@
   "name": "ally",
   "version": "0.1.0",
   "private": true,
-  "description": "Ally — personal context assistant. Phase 1 adds Expo via `npx expo install`, NOT create-expo-app (see ADR-009).",
+  "description": "Ally — personal context assistant (Expo dev build). Phase 1 adds Expo via expo install, NOT create-expo-app (ADR-009).",
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "format": "prettier --write \"src/**/*.{ts,tsx,json}\"",
-    "format:check": "prettier --check \"src/**/*.{ts,tsx,json}\"",
-    "test": "echo \"No tests yet — Dhrey adds the policy-engine suite in Phase 1\" && exit 0"
+    "format": "prettier --write \"src/**/*.{ts,tsx,json}\" \"*.{ts,tsx,json}\"",
+    "format:check": "prettier --check \"src/**/*.{ts,tsx,json}\" \"*.{ts,tsx,json}\"",
+    "test": "echo \"No tests yet — Dhrey adds the policy-engine suite in Phase 1\" && exit 0",
+    "start": "expo start --dev-client",
+    "android": "expo run:android",
+    "prebuild": "expo prebuild --platform android"
   },
   "devDependencies": {
+    "@types/react": "~19.2.4",
     "prettier": "^3.3.3",
     "typescript": "^5.6.3"
-  }
+  },
+  "dependencies": {
+    "expo": "^57.0.18",
+    "expo-dev-client": "~57.0.16",
+    "react": "19.2.3",
+    "react-native": "0.86.3"
+  },
+  "main": "index.ts"
 }

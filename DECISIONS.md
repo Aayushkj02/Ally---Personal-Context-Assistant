@@ -191,3 +191,38 @@ Because entries never move and IDs never collide, a merge conflict here is alway
 - **Impact:** Determines the demo's most visible moment. Must be spiked in the first hours of
   Phase 1; the outcome is recorded in `docs/DEVICE_NOTES.md` and confirmed in a follow-up ADR.
   Targeting 34 is a deliberate, temporary trade for demo reliability, not a shippable default.
+
+### ADR-103 — Expo SDK 57 dev build via continuous native generation
+- **Date:** 2026-08-29 · **Author:** Aayush · **Phase:** 1 · **Status:** Accepted
+- **Decision:** Ally builds as an Expo SDK 57 development build (React Native 0.86.3,
+  React 19.2.3) using continuous native generation: `android/` is produced by
+  `npx expo prebuild` and stays gitignored. App id is `com.ally.assistant`, URL scheme
+  is `ally`. `tsconfig.json` extends `expo/tsconfig.base` and re-asserts `strict`,
+  `noUncheckedIndexedAccess`, `noFallthroughCasesInSwitch`, `noImplicitOverride`,
+  `isolatedModules` and the `@/*` alias. Gradle runs against JDK 17.
+- **Reason:** Implements ADR-009 — Expo was added to the existing tree with
+  `npx expo install`, so the frozen contracts, mode files and docs survived untouched.
+  Keeping `android/` out of git means the native project is never a merge conflict:
+  it is regenerated, not reviewed. Extending the Expo base config rather than replacing
+  ours is what preserves the Phase 0 type strictness that gates every phase.
+- **Alternatives considered:** Committing `android/` — makes native changes reviewable
+  but turns every prebuild into a large diff and guarantees conflicts on a shared file
+  nobody owns. Bare React Native without Expo — loses `expo-dev-client` hot reload,
+  which is the mechanism that keeps Shlok and Dhrey off the rebuild path (ADR-001).
+- **Impact:** Anyone cloning the repo must run `npm install` then `npx expo prebuild
+  --platform android` before their first native build; there is no checked-in Android
+  project. JS changes still hot-reload with no rebuild. Two `app.json` keys were
+  dropped rather than adding libraries for them: `edgeToEdgeEnabled` is no longer
+  configurable now that Android 16 makes edge-to-edge mandatory, and
+  `userInterfaceStyle` would have required expo-system-ui for no Phase 1 benefit.
+- **Watch out:** `expo/tsconfig.base` does NOT set `isolatedModules`, so extending it
+  silently dropped ours. It is re-asserted explicitly. It matters: Metro transpiles
+  file-by-file, so without it TypeScript will not catch a type re-export that compiles
+  fine but breaks at runtime. Verify inherited settings with `npx tsc --showConfig`
+  rather than assuming.
+- **Gotcha for the team:** `java` on PATH here is JDK 26, which AGP does not support.
+  `JAVA_HOME` must point at JDK 17 (or the Android Studio JBR 21) or Gradle fails with
+  an unhelpful error. Ours is already set correctly.
+- **Open for T3:** compileSdk/targetSdk currently come from the `expo-root-project`
+  plugin defaults. If the DND ladder in ADR-102 forces targetSdk 34, that is an
+  `expo-build-properties` plugin entry in `app.json` — recorded in a follow-up ADR.

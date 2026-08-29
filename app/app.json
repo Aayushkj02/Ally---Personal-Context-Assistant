@@ -1,0 +1,14 @@
+{
+  "expo": {
+    "name": "Ally",
+    "slug": "ally",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "scheme": "ally",
+    "newArchEnabled": true,
+    "android": {
+      "package": "com.ally.assistant"
+    },
+    "plugins": ["expo-dev-client"]
+  }
+}
