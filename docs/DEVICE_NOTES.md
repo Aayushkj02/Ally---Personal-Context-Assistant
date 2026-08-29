@@ -52,6 +52,8 @@ Device `R5CY31SNAHK`, Samsung SM-S928B, Android 16, API 36, over USB adb.
 | `ally://` deep link starts the app | PASS |
 | Metro over USB (`adb reverse tcp:8081`) | PASS |
 | **AllyNativeModule loads at runtime** | **PASS — UI reads `device backend: native`** |
+| Reload by relaunch | PASS — force-stop, launch, fresh bundle, renders |
+| **Fast Refresh** | **PASS — edited App.tsx, change appeared in the running app with no rebuild or restart** |
 | `getDeviceInfo()` returns real values | PASS — manufacturer/model/API/targetSdk all correct |
 
 **App targetSdk is 36**, so we are on **ADR-102 rung 1**: `AutomaticZenRule` is required and
@@ -74,6 +76,18 @@ install, then launch — strictly in that order.
 served bundles fine. If the app hangs on load, test Metro with
 `curl -m 10 http://localhost:8081/status` before debugging the app. Restart with
 `npx expo start --dev-client`.
+
+**A stale HMR connection looks exactly like broken Fast Refresh.** Fast Refresh failed twice
+for us before being confirmed working. Both failures were the harness, not the product: once
+against a wedged Metro, once against an app whose HMR socket had gone stale after sitting idle.
+Metro logged `Android Bundled 32ms (1 module)` in every case, so *Metro rebuilding is not
+evidence the device received anything*. Before concluding Fast Refresh is broken, check
+`curl -s localhost:8081/json/list` — it must list `com.ally.assistant`, and if it lists
+`host.exp.exponent` you are looking at Expo Go, not our build. Then relaunch the app so it
+reconnects, and re-test.
+
+**Port 8081 must be free before starting Metro.** `npx expo start` is non-interactive here and
+exits with `Input is required` rather than prompting to use another port.
 
 > Android 15+ restricts direct global DND control for apps **targeting** API 35+. Apps targeting ≤34
 > retain legacy behaviour even when running on a newer device. See ADR-102 for the ladder.
