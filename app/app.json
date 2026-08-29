@@ -9,6 +9,9 @@
     "android": {
       "package": "com.ally.assistant"
     },
-    "plugins": ["expo-dev-client"]
+    "plugins": [
+      "expo-dev-client",
+      "expo-splash-screen"
+    ]
   }
 }

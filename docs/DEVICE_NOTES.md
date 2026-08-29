@@ -40,6 +40,41 @@ our APK (`com.ally.assistant`) installs or launches, and **Expo Go cannot load t
 custom Kotlin module** added in T2. From T2 onward, Ally must run from the installed
 development build or it will not start at all.
 
+## Verified on hardware — 2026-08-29
+
+Device `R5CY31SNAHK`, Samsung SM-S928B, Android 16, API 36, over USB adb.
+
+| Check | Result |
+|---|---|
+| APK installs (`adb install -r`) | PASS |
+| App launches, survives 30 s | PASS — pid stable |
+| JS bundle loads | PASS — `ReactNativeJS: Running "main"` (fabric: true) |
+| `ally://` deep link starts the app | PASS |
+| Metro over USB (`adb reverse tcp:8081`) | PASS |
+| **AllyNativeModule loads at runtime** | **PASS — UI reads `device backend: native`** |
+| `getDeviceInfo()` returns real values | PASS — manufacturer/model/API/targetSdk all correct |
+
+**App targetSdk is 36**, so we are on **ADR-102 rung 1**: `AutomaticZenRule` is required and
+legacy `setInterruptionFilter` is not available. Rung 2 (drop to targetSdk 34) remains the
+escape hatch if One UI's Zen implementation does not cooperate.
+
+### Two traps that cost time — do not repeat
+
+**`expo-splash-screen` is required by `expo-dev-client`.** Without it the app launches to a
+permanent white screen and the only clue is in logcat:
+`ClassNotFoundException: expo.modules.splashscreen.SplashScreenManager` from
+`DevLauncherController: Failed to hide splash screen`. It is not pulled in automatically when
+Expo is added to an existing project with `expo install` (ADR-009). Installed as a dependency.
+
+**Never `adb install -r` while the app is running.** Android kills the process, and the
+teardown in logcat looks like a crash but has no FATAL or AndroidRuntime entry. Force-stop,
+install, then launch — strictly in that order.
+
+**Metro can wedge.** It stayed listening on 8081 while timing out on `/status` after having
+served bundles fine. If the app hangs on load, test Metro with
+`curl -m 10 http://localhost:8081/status` before debugging the app. Restart with
+`npx expo start --dev-client`.
+
 > Android 15+ restricts direct global DND control for apps **targeting** API 35+. Apps targeting ≤34
 > retain legacy behaviour even when running on a newer device. See ADR-102 for the ladder.
 
