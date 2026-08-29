@@ -21,6 +21,7 @@ import type {
   PermissionRequirement,
   RingerMode,
 } from '../types';
+import { PERMISSION_LABELS } from './permissions';
 
 /** Simulated device state. Starts at plausible "normal phone" values. */
 interface MockState {
@@ -67,32 +68,6 @@ export function __resetMockState(): void {
     exact_alarm: true,
   };
 }
-
-const PERMISSION_LABELS: Record<
-  PermissionRequirement['key'],
-  Omit<PermissionRequirement, 'granted'>
-> = {
-  notification_policy: {
-    key: 'notification_policy',
-    label: 'Do Not Disturb access',
-    rationale: 'Lets Ally quiet notifications while a context is active.',
-  },
-  write_settings: {
-    key: 'write_settings',
-    label: 'Modify system settings',
-    rationale: 'Lets Ally change screen brightness and put it back afterwards.',
-  },
-  microphone: {
-    key: 'microphone',
-    label: 'Microphone',
-    rationale: 'Lets you tell Ally what you are doing instead of typing it.',
-  },
-  exact_alarm: {
-    key: 'exact_alarm',
-    label: 'Alarms & reminders',
-    rationale: 'Lets Ally set the wake alarm you ask for.',
-  },
-};
 
 function permission(key: PermissionRequirement['key']): PermissionRequirement {
   return { ...PERMISSION_LABELS[key], granted: state.permissions[key] };

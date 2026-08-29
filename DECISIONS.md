@@ -226,3 +226,27 @@ Because entries never move and IDs never collide, a merge conflict here is alway
 - **Open for T3:** compileSdk/targetSdk currently come from the `expo-root-project`
   plugin defaults. If the DND ladder in ADR-102 forces targetSdk 34, that is an
   `expo-build-properties` plugin entry in `app.json` — recorded in a follow-up ADR.
+
+### ADR-104 — Unimplemented capabilities report `not_supported`, never silently succeed
+- **Date:** 2026-08-29 · **Author:** Aayush · **Phase:** 1 · **Status:** Accepted
+- **Decision:** The native backend ships every capability from day one via
+  `pendingCapability()`: real permission reporting, `isAvailable() === false`, and
+  `not_supported` from `execute`/`restore` until the real implementation lands
+  (DND in T3, brightness in T4, alarms in T5). Permission metadata moved out of
+  `MockDevice.ts` into `src/native/permissions.ts`, shared by both backends.
+- **Reason:** The alternative — omitting capabilities until they are built — means the
+  registry is incomplete, `device.get('dnd')` can return undefined, and every consumer
+  needs a null check that disappears later. Worse, it delays the honest-failure path to
+  the end of the project when it is the single most load-bearing behaviour we have
+  (PRD 20, NFR-03). Shipping the truthful negative first means Dhrey's policy engine
+  and the action executor can be exercised end-to-end against a native backend before
+  a single device API is called, and the UI renders a real `not_supported` chip today.
+- **Alternatives considered:** Throw from unimplemented capabilities — turns a normal
+  product state into an exception and tempts a try/catch that swallows real failures.
+  Return `failed` — inaccurate; nothing was attempted, so nothing failed. Leave the
+  capability out of the registry — pushes an undefined check into every consumer.
+- **Impact:** `device.backend === 'native'` no longer implies every capability works,
+  so `isAvailable()` is the authority, not the backend name. Sharing the permission
+  labels removes the copy that would otherwise drift and makes the ADR-007 parity
+  obligation cheaper to keep. T3/T4 replace one entry in `createNativeCapabilities()`
+  at a time with no change to any caller.

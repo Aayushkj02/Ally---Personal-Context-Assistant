@@ -1,22 +1,27 @@
 /**
- * OWNER: AAYUSH — task T1
+ * OWNER: AAYUSH — tasks T1, T2
  *
  * Minimal root. Its only job in Phase 1 is to prove the dev build boots and to make
  * the active device backend VISIBLE.
  *
  * That backend line is not decoration: ADR-007 requires that a mock is never mistaken
- * for real hardware. Until the Kotlin module lands (T2) this reads "mock", and the
- * moment it says "native" we know T2 actually wired up.
+ * for real hardware. It reads "mock" in Expo Go or on any build without the Kotlin
+ * module, and "native" once the development build is installed.
+ *
+ * The device info below is what T3 needs to choose its DND rung — note that the app's
+ * own targetSdk, not the device OS version, is what decides whether legacy DND control
+ * is permitted (ADR-102).
  *
  * Real screens are Phase 2 and are owned per docs/OWNERSHIP.md. Do not grow this file.
  */
 
 import { StyleSheet, Text, View } from 'react-native';
 
-import { device } from './src/native';
+import { device, getNativeDeviceInfo } from './src/native';
 
 export default function App() {
   const isMock = device.backend === 'mock';
+  const info = getNativeDeviceInfo();
 
   return (
     <View style={styles.root}>
@@ -29,11 +34,25 @@ export default function App() {
         <Text style={styles.chipText}>device backend: {device.backend}</Text>
       </View>
 
-      <Text style={styles.note}>
-        {isMock
-          ? 'No native module yet — running against MockDevice. Nothing here touches the real phone.'
-          : 'Native module active. Device actions are real.'}
-      </Text>
+      {info ? (
+        <View style={styles.infoBox}>
+          <Text style={styles.info}>
+            {info.manufacturer} {info.model}
+          </Text>
+          <Text style={styles.info}>
+            Android {info.release} · device API {info.sdkInt} · app targetSdk {info.targetSdk}
+          </Text>
+          <Text style={styles.infoDim}>
+            {info.targetSdk >= 35
+              ? 'targetSdk >= 35 — DND needs AutomaticZenRule (ADR-102 rung 1)'
+              : 'targetSdk <= 34 — legacy setInterruptionFilter permitted (ADR-102 rung 2)'}
+          </Text>
+        </View>
+      ) : (
+        <Text style={styles.note}>
+          No native module — running against MockDevice. Nothing here touches the real phone.
+        </Text>
+      )}
     </View>
   );
 }
@@ -53,5 +72,8 @@ const styles = StyleSheet.create({
   chipMock: { backgroundColor: '#3A2E12' },
   chipNative: { backgroundColor: '#12331F' },
   chipText: { fontSize: 13, fontWeight: '600', color: '#F5F7FA' },
+  infoBox: { marginTop: 12, alignItems: 'center', gap: 4 },
+  info: { fontSize: 13, color: '#9AA4B2', textAlign: 'center' },
+  infoDim: { fontSize: 12, color: '#6B7688', textAlign: 'center', marginTop: 6 },
   note: { fontSize: 13, color: '#6B7688', textAlign: 'center', marginTop: 8 },
 });

@@ -1,0 +1,16 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+  <!--
+    Permissions the Ally capability layer needs. Declared with the module rather than in
+    app.json so they travel with the code that uses them.
+
+    ACCESS_NOTIFICATION_POLICY  DND / Zen  (T3)
+    WRITE_SETTINGS              brightness (T4)
+    SCHEDULE_EXACT_ALARM        alarms     (T5)
+
+    All three are user-granted via a settings screen, not a runtime dialog. Declaring them
+    grants nothing on its own - AllyNativeModule.getPermissionStatus() reports the truth.
+  -->
+  <uses-permission android:name="android.permission.ACCESS_NOTIFICATION_POLICY" />
+  <uses-permission android:name="android.permission.WRITE_SETTINGS" />
+  <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
+</manifest>
