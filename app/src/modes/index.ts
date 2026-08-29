@@ -6,7 +6,8 @@ export interface ModeDefaultAction {
   capability: Capability;
   value: CapabilityValue;
   needsSnapshot: boolean;
-  requiredPermission: 'notification_policy' | 'write_settings' | 'microphone' | 'exact_alarm' | null;
+  requiredPermission:
+    'notification_policy' | 'write_settings' | 'microphone' | 'exact_alarm' | null;
   reason: string;
 }
 

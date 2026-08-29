@@ -50,9 +50,7 @@ describe('IntentValidator', () => {
       kind: 'intent',
       intent: {
         ...validStudyIntent,
-        requestedChanges: [
-          { capability: 'coffee_maker' as any, value: 'on' },
-        ],
+        requestedChanges: [{ capability: 'coffee_maker' as any, value: 'on' }],
       },
     };
     const result = IntentValidator.validate(unknownCapInput);
@@ -68,9 +66,7 @@ describe('IntentValidator', () => {
       kind: 'intent',
       intent: {
         ...validStudyIntent,
-        requestedChanges: [
-          { capability: 'brightness', value: 150 },
-        ],
+        requestedChanges: [{ capability: 'brightness', value: 150 }],
       },
     };
     const result = IntentValidator.validate(invalidBrightnessInput);
@@ -86,9 +82,7 @@ describe('IntentValidator', () => {
       kind: 'intent',
       intent: {
         ...validStudyIntent,
-        requestedChanges: [
-          { capability: 'ringer', value: 'super_loud' },
-        ],
+        requestedChanges: [{ capability: 'ringer', value: 'super_loud' }],
       },
     };
     const result = IntentValidator.validate(invalidRingerInput);
@@ -101,9 +95,7 @@ describe('IntentValidator', () => {
       kind: 'intent',
       intent: {
         ...validStudyIntent,
-        requestedChanges: [
-          { capability: 'alarm', value: '25:99' },
-        ],
+        requestedChanges: [{ capability: 'alarm', value: '25:99' }],
       },
     };
     const result = IntentValidator.validate(invalidAlarmInput);

@@ -40,7 +40,11 @@ export class IntentValidator {
     }
 
     // Check activity
-    if (!intent.activity || !ACTIVITIES.includes(intent.activity) || intent.activity === 'unknown') {
+    if (
+      !intent.activity ||
+      !ACTIVITIES.includes(intent.activity) ||
+      intent.activity === 'unknown'
+    ) {
       return {
         kind: 'clarification',
         question: 'Which context profile would you like to use?',
@@ -124,7 +128,10 @@ export class IntentValidator {
       if (intent.schedule.kind === 'none') {
         validatedSchedule = { kind: 'none', time: null };
       } else if (intent.schedule.kind === 'once' || intent.schedule.kind === 'weekdays') {
-        if (typeof intent.schedule.time === 'string' && IntentValidator.isValidTime(intent.schedule.time)) {
+        if (
+          typeof intent.schedule.time === 'string' &&
+          IntentValidator.isValidTime(intent.schedule.time)
+        ) {
           validatedSchedule = {
             kind: intent.schedule.kind,
             time: intent.schedule.time,
@@ -154,7 +161,7 @@ export class IntentValidator {
       requestedChanges: validatedChanges,
       exceptions: validatedExceptions,
       confidence: intent.confidence,
-      requiresConfirmation: intent.requiresConfirmation ?? (intent.confidence < 0.7),
+      requiresConfirmation: intent.requiresConfirmation ?? intent.confidence < 0.7,
       rawText: intent.rawText ?? '',
       source: intent.source === 'ollama' ? 'ollama' : 'fallback',
     };

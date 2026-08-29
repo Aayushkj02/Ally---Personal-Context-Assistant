@@ -12,10 +12,7 @@ describe('DefaultIntentEngine', () => {
     };
 
     const fallbackParser = new FallbackParser();
-    const engine = new DefaultIntentEngine(
-      mockOllama as unknown as OllamaParser,
-      fallbackParser,
-    );
+    const engine = new DefaultIntentEngine(mockOllama as unknown as OllamaParser, fallbackParser);
 
     const result = await engine.parse("I'm going to study for 2 hours.");
 
@@ -51,10 +48,7 @@ describe('DefaultIntentEngine', () => {
     };
 
     const fallbackParser = new FallbackParser();
-    const engine = new DefaultIntentEngine(
-      mockOllama as unknown as OllamaParser,
-      fallbackParser,
-    );
+    const engine = new DefaultIntentEngine(mockOllama as unknown as OllamaParser, fallbackParser);
 
     const result = await engine.parse("I'm going to study for 2 hours.");
 
