@@ -14,4 +14,5 @@
  * None of these are Phase 1 work.
  */
 
-export {};
+export { default as PriorityScreen } from './Priority';
+export type { PriorityScreenProps } from './Priority';

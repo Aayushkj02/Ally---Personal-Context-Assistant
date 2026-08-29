@@ -361,6 +361,26 @@ Test 4 is the one that fails if anyone ever swaps the rolling window for "calls 
 for persistent callers is Android's own `PRIORITY_CATEGORY_REPEAT_CALLERS` on its 15-minute
 rule. Emergency classification is contextual and never writes to the user's priority list.
 
+
+## Priority screen — data and policy layer (Dhrey)
+
+`priority_preference` table, migration-managed via `PRAGMA user_version`. One row per
+(mode, channel, subject) with `UNIQUE(profile_id, channel, subject)`, so re-adding someone
+updates rather than duplicates.
+
+**Stored per contact, applied per scope (ADR-301).** The user names people; Android only
+understands starred / all contacts / anyone. `resolvePriority()` reduces the rows to a
+per-channel boolean for the device layer and returns `requiresStarring` so the screen can
+tell the user exactly who to star. Without that, "why didn't Mom ring?" has no answer.
+
+**WhatsApp shows its real state.** The screen renders `preference_only` from
+`ENFORCEMENT_PRESENTATION` — "Remembered, not enforced" — never a tick.
+
+### Demo prerequisite, worth repeating
+
+Priority contacts on **calls** and **SMS** must be **starred in the phone's Contacts app**.
+Adding them in Ally records the intent; Android will not act on it otherwise.
+
 ### Still to check before the demo
 
 - [ ] Run `DndProbe` on the actual iQOO and fill in the column above
