@@ -7,14 +7,18 @@
     "typecheck": "tsc --noEmit",
     "format": "prettier --write \"src/**/*.{ts,tsx,json}\" \"*.{ts,tsx,json}\"",
     "format:check": "prettier --check \"src/**/*.{ts,tsx,json}\" \"*.{ts,tsx,json}\"",
-    "test": "echo \"No tests yet — Dhrey adds the policy-engine suite in Phase 1\" && exit 0",
+    "test": "jest",
     "start": "expo start --dev-client",
     "android": "expo run:android",
     "prebuild": "expo prebuild --platform android"
   },
   "devDependencies": {
+    "@react-native/jest-preset": "^0.86.3",
+    "@types/jest": "^30.0.0",
     "@types/react": "~19.2.4",
+    "jest": "^30.5.0",
     "prettier": "^3.3.3",
+    "ts-jest": "^29.4.12",
     "typescript": "^5.6.3"
   },
   "dependencies": {
