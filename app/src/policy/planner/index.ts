@@ -1,15 +1,38 @@
-/**
- * OWNER: DHREY — task D3 (Phase 2; scaffolded now to fix the ownership boundary)
- *
- * ActionPlanner: ResolvedPolicy -> ActionPlan.
- *
- * WHY THIS LIVES UNDER policy/ AND NOT actions/:
- * docs/CONTRACTS.md §2 states ActionPlan is PRODUCED by Dhrey and CONSUMED by Aayush.
- * Placing the planner in src/actions/ (Aayush's tree) would put two owners in one
- * directory and blur the frozen contract boundary. The planner is the last step of
- * the policy layer; src/actions/ is execution only.
- *
- * The planner marks `needsSnapshot` and `requiredPermission`. It NEVER calls native code.
- */
+import type { Capability, PermissionRequirement } from '../../types/capability';
+import type { ActionPlan, PlannedAction, ResolvedPolicy } from '../../types/policy';
+import type { Persistence } from '../../types/intent';
 
-export {};
+const PERMISSION_MAP: Record<Capability, PermissionRequirement['key'] | null> = {
+  dnd: 'notification_policy',
+  ringer: 'notification_policy',
+  brightness: 'write_settings',
+  alarm: 'exact_alarm',
+};
+
+/**
+ * ActionPlanner: ResolvedPolicy -> ActionPlan.
+ * Maps resolved capabilities into actionable steps for the native layer.
+ */
+export function buildActionPlan(
+  sessionId: string,
+  policy: ResolvedPolicy,
+  persistence: Persistence
+): ActionPlan {
+  
+  // We need to restore state if this is not a permanent change
+  const restoreOnEnd = persistence === 'session' || persistence === 'temporary' || persistence === 'unspecified';
+
+  const actions: PlannedAction[] = policy.entries.map(entry => ({
+    capability: entry.capability,
+    value: entry.value,
+    needsSnapshot: restoreOnEnd, // take snapshot so we can restore it later
+    requiredPermission: PERMISSION_MAP[entry.capability],
+    reason: entry.reason
+  }));
+
+  return {
+    sessionId,
+    actions,
+    restoreOnEnd
+  };
+}

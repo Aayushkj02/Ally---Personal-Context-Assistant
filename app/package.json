@@ -7,10 +7,21 @@
     "typecheck": "tsc --noEmit",
     "format": "prettier --write \"src/**/*.{ts,tsx,json}\"",
     "format:check": "prettier --check \"src/**/*.{ts,tsx,json}\"",
-    "test": "echo \"No tests yet — Dhrey adds the policy-engine suite in Phase 1\" && exit 0"
+    "test": "jest"
   },
   "devDependencies": {
+    "@types/better-sqlite3": "^9.6.0",
+    "@types/jest": "^30.0.0",
+    "better-sqlite3": "^13.0.3",
+    "jest": "^30.5.0",
     "prettier": "^3.3.3",
+    "sqlite3": "^6.0.1",
+    "ts-jest": "^29.4.12",
     "typescript": "^5.6.3"
+  },
+  "dependencies": {
+    "expo": "^57.0.18",
+    "expo-sqlite": "^57.0.2",
+    "zustand": "^5.0.15"
   }
 }

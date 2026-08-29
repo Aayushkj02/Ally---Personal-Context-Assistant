@@ -15,4 +15,9 @@
  *   device_snapshot.previous_value   what restore reads; never recompute it
  */
 
-export {};
+export * from './profileRepository';
+export * from './sessionRepository';
+export * from './overrideRepository';
+export * from './snapshotRepository';
+export * from './commandRepository';
+export * from './permissionRepository';

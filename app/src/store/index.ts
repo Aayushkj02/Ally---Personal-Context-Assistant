@@ -8,4 +8,5 @@
  * SessionState values are FROZEN in src/types/policy.ts (PRD §15 lifecycle).
  */
 
-export {};
+export { useStore } from './useStore';
+export type { AppState } from './useStore';
