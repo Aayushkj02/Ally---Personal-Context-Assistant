@@ -27,10 +27,28 @@ export interface AllyNativeDeviceInfo {
 export type AllyPermissionKey =
   'notification_policy' | 'write_settings' | 'exact_alarm' | 'microphone';
 
+/** Result of a native mutation. `ok` is only true after the native side read the value back. */
+export interface NativeApplyResult {
+  ok: boolean;
+  /** Why it failed: 'permission' | 'unsupported' | 'mismatch' | 'error'. Null when ok. */
+  reason: string | null;
+  before: string | null;
+  after: string | null;
+  message: string;
+  /** Which ADR-102 rung did the work: 'zen_rule' | 'interruption_filter' | 'none'. */
+  rung: string;
+}
+
 export interface AllyNativeSpec {
   getDeviceInfo(): AllyNativeDeviceInfo;
   getPermissionStatus(key: AllyPermissionKey): boolean;
   openSettingsFor(key: AllyPermissionKey): boolean;
+
+  // DND (T3)
+  dndIsAvailable(): boolean;
+  dndGetMode(): string;
+  dndApply(mode: string): NativeApplyResult;
+  dndDebugState(): Record<string, unknown>;
 }
 
 const AllyNative = requireOptionalNativeModule<AllyNativeSpec>('AllyNative');

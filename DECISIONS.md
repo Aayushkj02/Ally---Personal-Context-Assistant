@@ -250,3 +250,46 @@ Because entries never move and IDs never collide, a merge conflict here is alway
   labels removes the copy that would otherwise drift and makes the ADR-007 parity
   obligation cheaper to keep. T3/T4 replace one entry in `createNativeCapabilities()`
   at a time with no change to any caller.
+
+### ADR-105 — DND ships on ADR-102 rung 2; `AutomaticZenRule` is unusable on One UI
+- **Date:** 2026-08-29 · **Author:** Aayush · **Phase:** 1 · **Status:** Accepted
+- **Decision:** `DndController` implements the ADR-102 ladder in code and falls through
+  automatically. Rung 1 (`AutomaticZenRule`) is attempted first and rung 2 (legacy
+  `NotificationManager.setInterruptionFilter`) does the work in practice. Every result
+  reports which rung ran via a `rung` field that reaches the UI. **`targetSdk` stays at 36** —
+  we did NOT need to drop to 34.
+- **Reason:** Three genuine attempts at rung 1 all failed on the Samsung SM-S928B (One UI,
+  Android 16). `addAutomaticZenRule()` first threw *"Rule must have a ConditionProviderService
+  and/or configuration activity"*; adding `setConfigurationActivity(MainActivity)` changed it to
+  *"Lacking enabled CPS or config activity"*; and that persisted even after MainActivity was
+  verified to resolve for `android.app.action.AUTOMATIC_ZEN_RULE_SETTINGS` via
+  `cmd package query-activities`. One UI rejects an app-owned zen rule that satisfies the
+  documented AOSP contract. Rung 2 works, immediately and repeatably.
+- **Alternatives considered:** Keep fighting rung 1 — unbounded time against an OEM behaviour
+  we cannot see the source of, on the highest-risk item in the project. Drop to `targetSdk 34`
+  as ADR-102 anticipated — turned out to be unnecessary, and would have been a real cost
+  (it constrains every other Android API we touch for the rest of the build).
+- **Impact:** **This removes a planned risk rather than adding one.** ADR-102 assumed rung 2
+  would require `targetSdk 34`; on this device the legacy call is honoured at 36, so the app
+  keeps a modern target. Rung 1 stays first in the ladder, so a device that supports it
+  (an iQOO may) gets the better implementation with no code change. `ZenPolicy` (the
+  priority-caller exception the demo needs) is only expressible on rung 1 — on rung 2 the
+  device's own priority-caller configuration applies, which must be checked before the demo.
+- **Supersedes nothing.** ADR-102's ladder stands; this records which rung reality selected.
+
+### ADR-106 — A capability rung only counts as working if the read-back confirms it
+- **Date:** 2026-08-29 · **Author:** Aayush · **Phase:** 1 · **Status:** Accepted
+- **Decision:** In a fallback ladder, "the call did not throw" is NOT success. A rung is only
+  accepted when the post-write read-back shows the device actually reached the target state;
+  otherwise we fall through to the next rung.
+- **Reason:** Found on device. Turning DND off with no zen rule registered made rung 1
+  deactivate a rule that never existed — a silent no-op that threw nothing, so the ladder
+  short-circuited and rung 2 never ran. The phone stayed in Total Silence while the app
+  correctly reported a mismatch. The report was truthful but the device was in the wrong
+  state, which is a worse failure than an honest error: the user asked for silence to end.
+- **Alternatives considered:** Special-case `off` to always use rung 2 — fixes this instance
+  and leaves the same trap for every future capability. Treat a no-op as failure at the rung
+  level — conflates "did nothing because nothing was needed" with "could not act".
+- **Impact:** Generalises to T4 (brightness) and T5 (alarms): read-back is what decides
+  success, not the absence of an exception. This is the same rule as PRD 20 / NFR-03 applied
+  one level down, to rung selection rather than to user-facing status.
