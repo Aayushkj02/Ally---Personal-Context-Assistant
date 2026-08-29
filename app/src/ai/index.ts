@@ -12,8 +12,9 @@
  */
 
 import type { ParseResult } from '../types';
-import { notImplemented } from '../utils/notImplemented';
 import type { ParseContext } from './parsers';
+import { FallbackParser, OllamaParser } from './parsers';
+import { IntentValidator } from './validators';
 
 export type { IntentParser, ParseContext } from './parsers';
 
@@ -24,8 +25,37 @@ export interface IntentEngine {
   parse(text: string, ctx?: ParseContext): Promise<ParseResult>;
 }
 
-export const intentEngine: IntentEngine = {
-  async parse(): Promise<ParseResult> {
-    return notImplemented('intentEngine.parse — Shlok, task S5');
-  },
-};
+export class DefaultIntentEngine implements IntentEngine {
+  private ollamaParser: OllamaParser;
+  private fallbackParser: FallbackParser;
+
+  constructor(ollamaParser?: OllamaParser, fallbackParser?: FallbackParser) {
+    this.ollamaParser = ollamaParser ?? new OllamaParser();
+    this.fallbackParser = fallbackParser ?? new FallbackParser();
+  }
+
+  async parse(text: string, ctx?: ParseContext): Promise<ParseResult> {
+    try {
+      const isOllamaAvailable = await this.ollamaParser.isAvailable();
+      if (isOllamaAvailable) {
+        const timeoutPromise = new Promise<null>((resolve) =>
+          setTimeout(() => resolve(null), OLLAMA_TIMEOUT_MS),
+        );
+
+        const ollamaPromise = this.ollamaParser.parse(text, ctx);
+        const result = await Promise.race([ollamaPromise, timeoutPromise]);
+
+        if (result) {
+          return IntentValidator.validate(result);
+        }
+      }
+    } catch {
+      // Fall through silently to FallbackParser on any error
+    }
+
+    const fallbackResult = await this.fallbackParser.parse(text, ctx);
+    return IntentValidator.validate(fallbackResult);
+  }
+}
+
+export const intentEngine: IntentEngine = new DefaultIntentEngine();

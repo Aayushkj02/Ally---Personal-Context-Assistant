@@ -102,7 +102,10 @@ function extractRequestedChanges(
   if (
     text.includes('priority mode') ||
     text.includes('dnd priority') ||
-    text.includes('priority only')
+    text.includes('priority only') ||
+    text.includes('block notifications') ||
+    text.includes('turn on dnd') ||
+    text.includes('dnd on')
   ) {
     changes.push({
       capability: 'dnd',
@@ -303,7 +306,8 @@ export class FallbackParser implements IntentParser {
         normalized.includes('done') ||
         normalized.includes('stop') ||
         normalized.includes('deactivate') ||
-        normalized.includes('finished')
+        normalized.includes('finished') ||
+        normalized.includes('undo')
     ) {
         operation = 'deactivate';
     } else if (

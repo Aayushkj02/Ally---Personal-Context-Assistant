@@ -8,6 +8,7 @@
     "format": "prettier --write \"src/**/*.{ts,tsx,json}\" \"*.{ts,tsx,json}\"",
     "format:check": "prettier --check \"src/**/*.{ts,tsx,json}\" \"*.{ts,tsx,json}\"",
     "test": "jest",
+    "eval": "jest src/ai/__tests__/eval.test.ts",
     "start": "expo start --dev-client",
     "android": "expo run:android",
     "prebuild": "expo prebuild --platform android"
