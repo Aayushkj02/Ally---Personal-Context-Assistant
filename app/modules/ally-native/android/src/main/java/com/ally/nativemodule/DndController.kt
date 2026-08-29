@@ -40,6 +40,107 @@ object DndController {
   private fun nm(context: Context): NotificationManager =
     context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
 
+  /**
+   * The user's NotificationManager.Policy as it was before Ally first touched it.
+   *
+   * Ally mutates this to express the priority-caller exception, so it is user state we
+   * borrowed and must give back — exactly like the interruption filter. Captured once, on the
+   * first mutation, and written back when the context ends.
+   *
+   * LIMITATION: this lives for the process only. If Ally is killed mid-context the policy is
+   * not restored on next launch. Durable snapshots belong in Dhrey's device_snapshot table;
+   * `policySnapshot()` exposes the serialized form so that can be wired up in Phase 2.
+   */
+  private var savedPolicy: NotificationManager.Policy? = null
+
+  private fun rememberPolicy(manager: NotificationManager) {
+    if (savedPolicy == null) {
+      savedPolicy = runCatching { manager.notificationPolicy }.getOrNull()
+    }
+  }
+
+  private fun describe(p: NotificationManager.Policy?): String? = p?.let {
+    "cat=${'$'}{it.priorityCategories},calls=${'$'}{it.priorityCallSenders},msgs=${'$'}{it.priorityMessageSenders}"
+  }
+
+  /** Serialized original policy, for durable persistence by the data layer later. */
+  fun policySnapshot(context: Context): Map<String, Any?> {
+    val manager = nm(context)
+    val current = runCatching { manager.notificationPolicy }.getOrNull()
+    return mapOf(
+      "saved" to describe(savedPolicy),
+      "current" to describe(current),
+      "hasSaved" to (savedPolicy != null),
+    )
+  }
+
+  /**
+   * Expresses "let my parents call me" using the mechanism that works on the rung we ship.
+   *
+   * ZenPolicy is a rung-1 feature and unavailable to us (ADR-105), so the exception goes
+   * through NotificationManager.Policy: PRIORITY_CATEGORY_CALLS scoped to starred contacts,
+   * plus PRIORITY_CATEGORY_REPEAT_CALLERS which is Android's own persistent-caller safety net.
+   *
+   * "Parents" therefore means STARRED CONTACTS — Android exposes no per-contact DND exception
+   * to apps. See ADR-107.
+   */
+  fun setPriorityCallers(context: Context, allowStarred: Boolean, allowRepeatCallers: Boolean): Map<String, Any?> {
+    val manager = nm(context)
+    if (!manager.isNotificationPolicyAccessGranted) {
+      return mapOf(
+        "ok" to false, "reason" to "permission",
+        "message" to "Do Not Disturb access is needed before Ally can change this.",
+      )
+    }
+    rememberPolicy(manager)
+    return try {
+      var categories = 0
+      if (allowStarred) categories = categories or NotificationManager.Policy.PRIORITY_CATEGORY_CALLS
+      if (allowRepeatCallers) categories = categories or NotificationManager.Policy.PRIORITY_CATEGORY_REPEAT_CALLERS
+      // Alarms stay allowed — silencing a context must never kill the user's alarm.
+      categories = categories or NotificationManager.Policy.PRIORITY_CATEGORY_ALARMS
+
+      manager.notificationPolicy = NotificationManager.Policy(
+        categories,
+        if (allowStarred) NotificationManager.Policy.PRIORITY_SENDERS_STARRED else 0,
+        0,
+      )
+      Thread.sleep(250)
+
+      val after = manager.notificationPolicy
+      val callsHeld = !allowStarred ||
+        (after.priorityCategories and NotificationManager.Policy.PRIORITY_CATEGORY_CALLS) != 0
+      val repeatHeld = !allowRepeatCallers ||
+        (after.priorityCategories and NotificationManager.Policy.PRIORITY_CATEGORY_REPEAT_CALLERS) != 0
+      val starredHeld = !allowStarred ||
+        after.priorityCallSenders == NotificationManager.Policy.PRIORITY_SENDERS_STARRED
+
+      mapOf(
+        "ok" to (callsHeld && repeatHeld && starredHeld),
+        "reason" to if (callsHeld && repeatHeld && starredHeld) null else "mismatch",
+        "starredCallsAllowed" to callsHeld,
+        "repeatCallersAllowed" to repeatHeld,
+        "starredSenderScope" to starredHeld,
+        "savedOriginal" to describe(savedPolicy),
+        "message" to if (callsHeld && repeatHeld && starredHeld) {
+          "Starred contacts and repeat callers can reach you."
+        } else {
+          "Android did not hold the requested priority-caller policy."
+        },
+      )
+    } catch (t: Throwable) {
+      mapOf("ok" to false, "reason" to "error", "message" to (t.message ?: "Priority caller change failed."))
+    }
+  }
+
+  /** Puts the user's original notification policy back. Called when a context ends. */
+  private fun restorePolicy(manager: NotificationManager) {
+    savedPolicy?.let {
+      runCatching { manager.notificationPolicy = it }
+      savedPolicy = null
+    }
+  }
+
   fun isAvailable(context: Context): Boolean {
     if (Build.VERSION.SDK_INT < MIN_SDK) return false
     return try {
@@ -175,6 +276,9 @@ object DndController {
       val existingId = findOurRuleId(manager)
 
       if (mode == "off") {
+        // Ending the context gives back BOTH pieces of borrowed state: the interruption
+        // filter and the notification policy we changed to express priority callers.
+        restorePolicy(manager)
         // Deactivate our rule rather than forcing the filter. Anything else the user has
         // running stays in charge, which is what makes this reversible.
         existingId?.let {

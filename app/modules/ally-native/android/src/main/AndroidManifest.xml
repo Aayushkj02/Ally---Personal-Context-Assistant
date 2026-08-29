@@ -13,4 +13,12 @@
   <uses-permission android:name="android.permission.ACCESS_NOTIFICATION_POLICY" />
   <uses-permission android:name="android.permission.WRITE_SETTINGS" />
   <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
+
+  <!--
+    READ_CALL_LOG backs repeated-caller DETECTION only (CallLogAnalyzer). It never changes
+    DND policy and never makes anything ring — Android's own PRIORITY_CATEGORY_REPEAT_CALLERS
+    does that. Without this grant the feature reports "permission" and stays silent rather
+    than guessing. See ADR-109.
+  -->
+  <uses-permission android:name="android.permission.READ_CALL_LOG" />
 </manifest>

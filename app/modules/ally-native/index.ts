@@ -51,6 +51,33 @@ export interface AllyNativeSpec {
   dndDebugState(): Record<string, unknown>;
   /** Demo-device compatibility probe. Reverts everything it touches. */
   dndProbe(): Record<string, unknown>;
+
+  /** Priority-caller exception + Android's repeat-caller bypass (ADR-107). */
+  dndSetPriorityCallers(
+    allowStarred: boolean,
+    allowRepeatCallers: boolean,
+  ): Record<string, unknown>;
+  dndPolicySnapshot(): Record<string, unknown>;
+
+  // Brightness (T4). Percent is the contract currency; raw values prove exact restoration.
+  brightnessIsAvailable(): boolean;
+  brightnessSnapshot(): {
+    ok: boolean;
+    reason: string | null;
+    percent: number | null;
+    raw: number | null;
+    autoMode?: boolean;
+  };
+  brightnessApply(
+    percent: number,
+  ): NativeApplyResult & { beforeRaw: number | null; afterRaw: number | null };
+  brightnessRestore(
+    percent: number,
+  ): NativeApplyResult & { beforeRaw: number | null; afterRaw: number | null };
+
+  // Repeated-caller DETECTION only. Never changes DND, never makes anything ring (ADR-109).
+  callLogHasPermission(): boolean;
+  callLogAnalyse(): Record<string, unknown>;
 }
 
 const AllyNative = requireOptionalNativeModule<AllyNativeSpec>('AllyNative');

@@ -120,6 +120,26 @@ class AllyNativeModule : Module() {
      * exception the demo depends on is expressible. Reverts everything it touches.
      */
     Function("dndProbe") { DndProbe.run(context) }
+
+    /** Priority-caller exception + Android's own repeat-caller bypass (ADR-107). */
+    Function("dndSetPriorityCallers") { allowStarred: Boolean, allowRepeatCallers: Boolean ->
+      DndController.setPriorityCallers(context, allowStarred, allowRepeatCallers)
+    }
+
+    /** The user's original notification policy, for durable persistence by the data layer. */
+    Function("dndPolicySnapshot") { DndController.policySnapshot(context) }
+
+    // ---- Brightness (T4) ----
+
+    Function("brightnessIsAvailable") { BrightnessController.isAvailable(context) }
+    Function("brightnessSnapshot") { BrightnessController.snapshot(context) }
+    Function("brightnessApply") { percent: Int -> BrightnessController.apply(context, percent) }
+    Function("brightnessRestore") { percent: Int -> BrightnessController.restore(context, percent) }
+
+    // ---- Repeated-caller DETECTION (T4). Never rings anything — see CallLogAnalyzer. ----
+
+    Function("callLogHasPermission") { CallLogAnalyzer.hasPermission(context) }
+    Function("callLogAnalyse") { CallLogAnalyzer.analyse(context) }
   }
 
   private fun appDetailsIntent(): Intent =

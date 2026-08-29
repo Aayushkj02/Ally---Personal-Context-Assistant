@@ -214,6 +214,88 @@ first, so no code change would be needed.
 | Priority-caller expressible? | **yes**, via `NotificationManager.Policy` | ⬜ |
 | Permission-denied safe? | yes, no mutation | ⬜ |
 
+
+## T4 — brightness, policy restore, call safety (Samsung SM-S928B, Android 16, targetSdk 36)
+
+### Brightness — VERIFIED
+
+`Settings.System.SCREEN_BRIGHTNESS`, raw range 0..255 on this device, gated by `WRITE_SETTINGS`.
+
+| Step | raw | note |
+|---|---|---|
+| baseline | 187 | app reports 73% |
+| apply 30% | **77** | `round(30 x 255/100)` |
+| restore | **187 EXACT** | percent-only path would give 186 |
+
+**187 was chosen deliberately** — it is a value where the exact path and the percent path
+disagree. At 186 both agree and the bug below would have been invisible.
+
+**Bug caught on device (ADR-110):** a single cached raw slot was not enough. The UI
+re-snapshots after every change to refresh its display, which overwrote the original before
+restore could use it — restoring 73% returned 186 instead of 187. Fixed with a percent→raw map.
+
+**Adaptive brightness** is snapshotted and restored. Without pinning to manual first, the light
+sensor overwrites a manual write within moments — a change that reads back as applied and then
+silently reverts.
+
+**Limitation:** the raw cache is process-lifetime. Restoring across an app kill needs the value
+persisted in `device_snapshot` (Dhrey's layer).
+
+### Priority callers — POLICY VERIFIED, RINGING NOT VERIFIED
+
+`NotificationManager.Policy` with `PRIORITY_CATEGORY_CALLS` + `PRIORITY_SENDERS_STARRED` +
+`PRIORITY_CATEGORY_REPEAT_CALLERS`, plus `PRIORITY_CATEGORY_ALARMS` always — silencing a
+context must never kill the user's alarm.
+
+Device result: `ok: true`, `starredCallsAllowed: true`, `repeatCallersAllowed: true`,
+`starredSenderScope: true`.
+
+> **"Parents" means STARRED CONTACTS.** Android exposes no per-contact DND exception to apps.
+> Whoever must ring through has to be starred in the device's contacts, or the exception will
+> not fire. This is a product constraint, not an implementation detail.
+
+**NOT VERIFIED: that the phone actually rings.** That needs a second phone placing real calls.
+See the checklist below.
+
+### Repeated-caller detection — VERIFIED (detection only)
+
+`CallLogAnalyzer`, 4+ calls from one caller in a rolling 10-minute window from real timestamps.
+Device result with `READ_CALL_LOG` granted: `ok: true`, `thresholdMet: true`, qualifying caller
+correctly identified from live call history.
+
+**This never makes anything ring** — see ADR-109. Ringing is Android's
+`PRIORITY_CATEGORY_REPEAT_CALLERS` on its own 15-minute rule. Ally's 4-in-10 rule is a
+*report*: "X has called 4 times in 10 minutes."
+
+| Aspect | Rule |
+|---|---|
+| Threshold | >= 4 (strictly more than 3) |
+| Window | rolling 10 min, from `CallLog.Calls.DATE` |
+| Counted | INCOMING, MISSED, REJECTED, BLOCKED |
+| Not counted | OUTGOING, VOICEMAIL |
+| Identity | last 9 digits, so +91 and 0-prefixed forms match |
+| Unknown/withheld | counted as `unidentifiedCalls`, **never merged** into one caller |
+| No permission / query fails | `ok:false` + reason, `thresholdMet:false`, DND untouched |
+
+### DND policy snapshot/restore
+
+The user's `NotificationManager.Policy` is captured before the first mutation and written back
+when the context ends, alongside the interruption filter. **Limitation:** process-lifetime only
+— an app kill mid-context will not restore it. `dndPolicySnapshot()` exposes the serialized form
+so the data layer can persist it durably in Phase 2.
+
+### ⚠ REQUIRES A SECOND PHONE — not verifiable from this machine
+
+These cannot be proven by API read-back and are explicitly NOT marked passing:
+
+- [ ] Star the demo contact first, or nothing below will fire
+- [ ] Start a DND context, call from the **starred** contact → phone must ring
+- [ ] Call from a **non-starred** contact → must stay suppressed
+- [ ] Call 4+ times in 10 min from a non-starred number → Android's repeat-caller bypass rings
+- [ ] Confirm 1–3 calls do **not** trigger it
+- [ ] Two callers with 2 calls each → neither qualifies, counts not merged
+- [ ] End the context → original DND filter, policy and brightness all restored
+
 ### Still to check before the demo
 
 - [ ] Run `DndProbe` on the actual iQOO and fill in the column above

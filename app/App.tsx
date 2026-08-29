@@ -14,7 +14,13 @@ import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import type { ActionResult, CapabilityValue, DndMode } from './src/types';
 import { STATUS_PRESENTATION } from './src/types';
-import { device, getNativeDeviceInfo, runDndProbe } from './src/native';
+import {
+  device,
+  getNativeDeviceInfo,
+  runDndProbe,
+  setPriorityCallers,
+  analyseCallLog,
+} from './src/native';
 
 const DND_TESTS: { label: string; value: DndMode }[] = [
   { label: 'Priority', value: 'priority' },
@@ -40,13 +46,21 @@ export default function App() {
   const [granted, setGranted] = useState<boolean | null>(null);
   const [log, setLog] = useState<ActionResult[]>([]);
   const [probe, setProbe] = useState<Record<string, unknown> | null>(null);
+  const [bright, setBright] = useState<CapabilityValue | null>(null);
+  // The value as it was BEFORE Ally touched anything. Restore must target this, not the
+  // current reading — otherwise "restore" just re-applies whatever we last set.
+  const [originalBright, setOriginalBright] = useState<CapabilityValue | null>(null);
+  const brightness = device.get('brightness');
 
   const refresh = useCallback(async () => {
     setAvailable(await dnd.isAvailable());
     setSnapshot(await dnd.snapshot());
     const perms = await dnd.requiredPermissions();
     setGranted(perms[0]?.granted ?? null);
-  }, [dnd]);
+    const snap = await brightness.snapshot();
+    setBright(snap);
+    setOriginalBright((prev) => (prev === null ? snap : prev));
+  }, [dnd, brightness]);
 
   useEffect(() => {
     void refresh();
@@ -103,6 +117,53 @@ export default function App() {
       <Pressable style={[styles.btn, styles.btnProbe]} onPress={() => setProbe(runDndProbe())}>
         <Text style={styles.btnText}>Run device probe</Text>
       </Pressable>
+
+      <View style={styles.divider} />
+      <Text style={styles.section}>Brightness (T4)</Text>
+      <Text style={styles.info}>
+        current: <Text style={styles.strong}>{String(bright)}%</Text>
+      </Text>
+      <View style={styles.row}>
+        {[30, 70].map((p) => (
+          <Pressable
+            key={p}
+            style={styles.btn}
+            onPress={async () => {
+              const r = await brightness.execute(p);
+              setLog((prev) => [r, ...prev].slice(0, 6));
+              await refresh();
+            }}
+          >
+            <Text style={styles.btnText}>{p}%</Text>
+          </Pressable>
+        ))}
+        <Pressable
+          style={styles.btn}
+          onPress={async () => {
+            if (originalBright !== null) {
+              const r = await brightness.restore(originalBright);
+              setLog((prev) => [r, ...prev].slice(0, 6));
+            }
+            await refresh();
+          }}
+        >
+          <Text style={styles.btnText}>Restore {String(originalBright)}%</Text>
+        </Pressable>
+        <Pressable style={styles.btn} onPress={() => void device.openSettingsFor('write_settings')}>
+          <Text style={styles.btnText}>Grant write</Text>
+        </Pressable>
+      </View>
+
+      <View style={styles.divider} />
+      <Text style={styles.section}>Call safety (T4)</Text>
+      <View style={styles.row}>
+        <Pressable style={styles.btn} onPress={() => setProbe(setPriorityCallers(true, true))}>
+          <Text style={styles.btnText}>Allow starred + repeat</Text>
+        </Pressable>
+        <Pressable style={styles.btn} onPress={() => setProbe(analyseCallLog())}>
+          <Text style={styles.btnText}>Check repeat callers</Text>
+        </Pressable>
+      </View>
 
       {probe ? (
         <View style={styles.probeBox}>
