@@ -335,3 +335,55 @@ Because entries never move and IDs never collide, a merge conflict here is alway
 - **Impact:** Any new Android device is characterised in seconds. Also useful if the demo phone
   is swapped at short notice. The probe is Phase 1 harness code and is removed with `App.tsx`
   in Phase 2, but `DndProbe.kt` itself should stay.
+
+### ADR-109 — Repeated-caller: Android's bypass for ringing, our rule for detection
+- **Date:** 2026-08-29 · **Author:** Aayush · **Phase:** 1 · **Status:** Accepted
+- **Decision:** The "someone urgently needs me" safety net is split in two.
+  **Ringing** is Android's own `PRIORITY_CATEGORY_REPEAT_CALLERS`, enabled alongside the
+  starred-caller exception. **Detection** of the specified rule — 4 or more calls from one
+  caller in a rolling 10 minutes — is `CallLogAnalyzer`, which reports and never rings.
+- **Reason:** The rule as specified cannot be implemented. Android does not let an app define
+  a repeat-caller window (the platform constant is 15 minutes and is not configurable), and no
+  app can un-suppress a specific incoming call: DND is evaluated by the system, in advance,
+  against policy. `CallScreeningService` can only silence or reject — it cannot rescue a call
+  DND already suppressed, and requires being the default screening app. Building a "4-in-10
+  makes it ring" path would have produced a feature that looks right in code and does nothing
+  on the phone, which is the exact failure mode this project keeps guarding against.
+- **Alternatives considered:** Native bypass only — loses the specified rule entirely.
+  Detection only — no actual ring-through, so no safety benefit. Default call-screening app —
+  days of work, still cannot un-silence a suppressed call, and puts the demo at risk.
+- **Impact:** Persistent callers genuinely ring through, on Android's 15-minute rule rather
+  than ours. Ally separately reports "X has called 4 times in 10 minutes" in the result card
+  and audit log, which is honest and still useful — it tells the user why their phone rang, or
+  that someone is trying to reach them. The two must never be conflated in UI copy.
+- **Counting rule:** INCOMING, MISSED, REJECTED and BLOCKED all count — each is someone trying
+  to reach you. OUTGOING and VOICEMAIL do not. Numbers are matched on their last 9 digits so
+  `+91 98765 43210` and `098765 43210` are one person.
+- **Unknown callers are never merged.** Withheld/private/payphone entries are counted as
+  unidentified and excluded from per-caller totals: two different withheld callers are not one
+  persistent caller, and merging them would manufacture an emergency nobody triggered.
+- **Fails conservatively.** Without `READ_CALL_LOG`, or on any query failure, it returns
+  `ok:false` with a reason and `thresholdMet:false`. It never guesses a count and never touches
+  DND policy.
+
+### ADR-110 — Brightness restores the exact raw value, not the percent
+- **Date:** 2026-08-29 · **Author:** Aayush · **Phase:** 1 · **Status:** Accepted
+- **Decision:** `BrightnessController` keeps a percent→raw map of every value it observes and
+  writes the exact raw `Settings.System.SCREEN_BRIGHTNESS` back on restore. It also snapshots
+  and restores `SCREEN_BRIGHTNESS_MODE`.
+- **Reason:** The frozen contract carries brightness as an integer percent, but Android stores
+  a 0..255 raw value. Round-tripping raw→percent→raw loses up to one unit: a phone at raw 187
+  reports 73%, and 73% converts back to 186. "Restore to exactly what it was" would have been
+  quietly false. Verified on device — restoring from raw 187 returns 187, where the percent-only
+  path returns 186.
+  Adaptive brightness matters for the same reason: if the device is in automatic mode the light
+  sensor overwrites a manual write moments later, producing a change that read back as applied
+  and then silently reverted.
+- **Alternatives considered:** Accept percent-resolution restoration — invisible to the eye but
+  makes a promise we do not keep, and the demo's whole argument is that Ally gives your phone
+  back exactly. Change the contract to carry raw — leaks a device-specific range into a frozen
+  cross-module type and breaks the policy engine's percent semantics.
+- **Impact:** A single cached slot was not enough and this was caught on device: the UI
+  re-snapshots after each change to refresh its display, which overwrote the original before
+  restore could use it. The map fixes that. The cache is process-lifetime only; durable
+  restoration across an app kill needs the value persisted in Dhrey's `device_snapshot` table.

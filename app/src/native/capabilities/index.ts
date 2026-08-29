@@ -3,7 +3,7 @@
  *
  * Real, native-backed DeviceCapability implementations.
  *
- * STATE: DND is implemented (T3). Brightness (T4) and alarm (T5) are still
+ * STATE: DND (T3) and brightness (T4) are implemented. Ringer and alarm (T5) are still
  * `pendingCapability` — they answer `isAvailable() === false` and return
  * `not_supported` from execute/restore.
  *
@@ -26,6 +26,7 @@ import type {
 import type { AllyNativeSpec } from '../../../modules/ally-native';
 import { describePermission } from '../permissions';
 import { createDndCapability } from './DndCapability';
+import { createBrightnessCapability } from './BrightnessCapability';
 
 /**
  * A capability whose native implementation has not landed yet.
@@ -74,7 +75,7 @@ export function createNativeCapabilities(
 ): Record<Capability, DeviceCapability> {
   return {
     dnd: createDndCapability(native),
-    brightness: pendingCapability('brightness', 'write_settings', native, 'T4'),
+    brightness: createBrightnessCapability(native),
     // Ringer is a separate capability from DND and is not part of T3.
     ringer: pendingCapability('ringer', 'notification_policy', native, 'T5'),
     alarm: pendingCapability('alarm', 'exact_alarm', native, 'T5'),

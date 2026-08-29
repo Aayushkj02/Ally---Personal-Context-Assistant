@@ -43,3 +43,19 @@ export function getNativeDeviceInfo(): AllyNativeDeviceInfo | null {
 export function runDndProbe(): Record<string, unknown> | null {
   return AllyNative ? AllyNative.dndProbe() : null;
 }
+
+/** Priority-caller exception + Android's repeat-caller bypass (ADR-107). */
+export function setPriorityCallers(
+  allowStarred: boolean,
+  allowRepeatCallers: boolean,
+): Record<string, unknown> | null {
+  return AllyNative ? AllyNative.dndSetPriorityCallers(allowStarred, allowRepeatCallers) : null;
+}
+
+/**
+ * Repeated-caller DETECTION: 4+ calls from one caller in a rolling 10 minutes.
+ * Reports only — it never changes DND and never makes anything ring (ADR-109).
+ */
+export function analyseCallLog(): Record<string, unknown> | null {
+  return AllyNative ? AllyNative.callLogAnalyse() : null;
+}
