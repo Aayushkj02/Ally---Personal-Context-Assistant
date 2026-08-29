@@ -1,0 +1,13 @@
+# Markdown is deliberately NOT formatted.
+# DECISIONS.md and FLOW.md are append-only shared files (see DECISIONS.md ADR-006 / plan §O).
+# A formatter rewriting table alignment in them would manufacture the merge conflicts
+# the append-only scheme exists to prevent.
+*.md
+
+# Generated / vendored
+node_modules/
+android/
+ios/
+.expo/
+dist/
+package-lock.json

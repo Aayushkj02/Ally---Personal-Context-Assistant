@@ -1,0 +1,21 @@
+# Normalize line endings so Windows/macOS/Linux checkouts never produce phantom diffs.
+# Without this, one teammate's editor can rewrite every line of a file and turn a
+# one-line change into a whole-file merge conflict.
+* text=auto eol=lf
+
+# Binary — never touch
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.webp binary
+*.mp4 binary
+*.keystore binary
+*.jks binary
+*.apk binary
+*.aab binary
+*.ttf binary
+*.otf binary
+
+# Lockfiles: collapse the diff noise in review, still merged normally
+package-lock.json -diff

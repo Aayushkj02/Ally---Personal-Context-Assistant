@@ -1,0 +1,41 @@
+{
+  "modeKey": "study",
+  "name": "Study",
+  "description": "Deep focus. Silent, minimal interruptions, dimmed screen.",
+  "defaultDurationMinutes": 120,
+  "restoreOnEnd": true,
+  "defaults": [
+    {
+      "capability": "dnd",
+      "value": "priority",
+      "needsSnapshot": true,
+      "requiredPermission": "notification_policy",
+      "reason": "Study keeps interruptions down"
+    },
+    {
+      "capability": "brightness",
+      "value": 40,
+      "needsSnapshot": true,
+      "requiredPermission": "write_settings",
+      "reason": "Study dims the screen"
+    },
+    {
+      "capability": "ringer",
+      "value": "silent",
+      "needsSnapshot": true,
+      "requiredPermission": "notification_policy",
+      "reason": "Study silences the ringer"
+    }
+  ],
+  "defaultExceptions": [],
+  "phrases": {
+    "activate": [
+      "i'm going to study",
+      "im studying",
+      "study mode",
+      "time to study",
+      "let me study"
+    ],
+    "deactivate": ["i'm done studying", "done studying", "finished studying", "stop studying"]
+  }
+}

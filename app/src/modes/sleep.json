@@ -1,0 +1,28 @@
+{
+  "modeKey": "sleep",
+  "name": "Sleep",
+  "description": "Wind down. Very low brightness, alarms only, wake alarm scheduled.",
+  "defaultDurationMinutes": null,
+  "restoreOnEnd": true,
+  "defaults": [
+    {
+      "capability": "dnd",
+      "value": "alarms_only",
+      "needsSnapshot": true,
+      "requiredPermission": "notification_policy",
+      "reason": "Sleep blocks everything except alarms"
+    },
+    {
+      "capability": "brightness",
+      "value": 10,
+      "needsSnapshot": true,
+      "requiredPermission": "write_settings",
+      "reason": "Sleep drops the screen to its dimmest comfortable level"
+    }
+  ],
+  "defaultExceptions": [],
+  "phrases": {
+    "activate": ["i'm going to sleep", "going to bed", "im off to bed", "sleep mode", "goodnight"],
+    "deactivate": ["i'm awake", "good morning", "wake up", "end sleep mode"]
+  }
+}

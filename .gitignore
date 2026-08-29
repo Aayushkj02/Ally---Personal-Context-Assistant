@@ -1,0 +1,46 @@
+# Dependencies
+node_modules/
+.pnp/
+.pnp.js
+
+# Expo / React Native generated native projects
+# `npx expo prebuild` regenerates these. Committing them guarantees merge pain.
+app/android/
+app/ios/
+.expo/
+.expo-shared/
+*.jsbundle
+
+# Build output
+dist/
+build/
+web-build/
+*.apk
+*.aab
+*.keystore
+*.jks
+
+# Secrets
+.env
+.env.*
+!.env.example
+google-services.json
+
+# Logs
+*.log
+npm-debug.log*
+yarn-error.log*
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json
+
+# Test / coverage
+coverage/
+*.tsbuildinfo
+
+# Ollama model dumps, eval scratch
+evals/out/
