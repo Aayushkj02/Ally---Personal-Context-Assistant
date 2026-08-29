@@ -1,9 +1,8 @@
 /**
- * OWNER: DHREY — tasks D2, D3
+ * OWNER: DHREY
  *
- * PUBLIC SURFACE of the policy layer. Produces ResolvedPolicy and ActionPlan.
- * Consumes Intent (from Shlok) and profile/override rows (from src/memory).
- * Hands ActionPlan to src/actions (Aayush) — that handoff is a frozen contract.
+ * PUBLIC SURFACE of the policy layer. Consumes stored preferences and Intents; produces
+ * the shapes the device layer accepts. Never calls native code itself.
  */
 
-export {};
+export * from './resolver';
