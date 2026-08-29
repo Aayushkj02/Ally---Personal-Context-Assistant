@@ -69,6 +69,42 @@ export const CHANNEL_ENFORCEABLE: Record<Channel, boolean> = {
   whatsapp: false,
 };
 
+/**
+ * What actually happened to a channel's priority preference (ADR-113).
+ *
+ * The four states exist because "we saved your setting" and "your phone will behave
+ * differently" are genuinely different promises, and collapsing them is how a product
+ * ends up lying to its user:
+ *
+ *   enforced        Applied to Android AND confirmed by reading the policy back.
+ *   preference_only Ally remembers it; Android exposes no way to act on it. WhatsApp.
+ *   unsupported     The device or API level cannot do this at all.
+ *   failed          We attempted it and Android did not hold the change.
+ */
+export const ENFORCEMENT_STATUSES = [
+  'enforced',
+  'preference_only',
+  'unsupported',
+  'failed',
+] as const;
+export type EnforcementStatus = (typeof ENFORCEMENT_STATUSES)[number];
+
+export interface ChannelEnforcement {
+  channel: Channel;
+  status: EnforcementStatus;
+  /** Plain language for the user. Never API jargon. */
+  message: string;
+}
+
+/** UI copy per status, so screens cannot invent their own wording. */
+export const ENFORCEMENT_PRESENTATION: Record<EnforcementStatus, { label: string; tone: string }> =
+  {
+    enforced: { label: 'Active on your phone', tone: 'success' },
+    preference_only: { label: 'Remembered, not enforced', tone: 'warning' },
+    unsupported: { label: 'Not supported on this device', tone: 'neutral' },
+    failed: { label: 'Failed', tone: 'danger' },
+  };
+
 /** Android permission a capability needs before it may execute (SRS FR-12). */
 export interface PermissionRequirement {
   /** Stable key used by the Permissions screen and PermissionState rows. */

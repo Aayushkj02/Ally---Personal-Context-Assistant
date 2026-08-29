@@ -312,6 +312,21 @@ ctors:      (int,int,int) (int,int,int,int) (int,int,int,int,int)
 | **Calls** | **YES** | `PRIORITY_CATEGORY_CALLS` + `PRIORITY_SENDERS_STARRED` |
 | **SMS** | **YES** | `PRIORITY_CATEGORY_MESSAGES` + `PRIORITY_SENDERS_STARRED` |
 | **WhatsApp** | **NO — remembered only** | No public API grants another app's notifications a DND bypass |
+
+### Enforcement states reported per channel (ADR-113)
+
+`setPriority` returns a per-channel breakdown, not one boolean, because "we saved your setting"
+and "your phone will behave differently" are different promises:
+
+| State | Meaning |
+|---|---|
+| `enforced` | Applied to Android **and confirmed by reading the policy back** |
+| `preference_only` | Ally remembers it; Android exposes no way to act on it. **WhatsApp, always** |
+| `unsupported` | Device or API level cannot do this at all |
+| `failed` | Attempted and Android did not hold the change |
+
+`preference_only` is unreachable from a successful device call — it is hard-coded for WhatsApp,
+so no code path can report a WhatsApp preference as active.
 | Repeat callers | YES (Android's rule) | `PRIORITY_CATEGORY_REPEAT_CALLERS`, 15-min system window |
 
 **Two limits the UI must state, not hide:**

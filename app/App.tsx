@@ -18,7 +18,7 @@ import {
   device,
   getNativeDeviceInfo,
   runDndProbe,
-  setPriorityCallers,
+  applyPriorityPreferences,
   analyseCallLog,
 } from './src/native';
 
@@ -36,6 +36,17 @@ const TONE_COLOR: Record<string, string> = {
   info: '#1F5F9B',
   neutral: '#3A4250',
 };
+
+/** Flattens the per-channel result into rows the existing debug renderer can show. */
+function channelRows(r: {
+  ok: boolean;
+  channels: { channel: string; status: string; message: string }[];
+}): Record<string, unknown> {
+  return {
+    verdict: r.ok ? 'calls + sms enforced' : 'not fully enforced',
+    ...Object.fromEntries(r.channels.map((c) => [c.channel, `${c.status} — ${c.message}`])),
+  };
+}
 
 export default function App() {
   const info = getNativeDeviceInfo();
@@ -157,8 +168,16 @@ export default function App() {
       <View style={styles.divider} />
       <Text style={styles.section}>Call safety (T4)</Text>
       <View style={styles.row}>
-        <Pressable style={styles.btn} onPress={() => setProbe(setPriorityCallers(true, true))}>
-          <Text style={styles.btnText}>Allow starred + repeat</Text>
+        <Pressable
+          style={styles.btn}
+          onPress={() => {
+            // Ask for all three. Calls and SMS reach Android; WhatsApp never does and comes
+            // back preference_only, which is the entire point of the vocabulary.
+            const r = applyPriorityPreferences({ calls: true, sms: true, whatsapp: true });
+            setProbe(r ? channelRows(r) : null);
+          }}
+        >
+          <Text style={styles.btnText}>Apply priority (calls+sms+wa)</Text>
         </Pressable>
         <Pressable style={styles.btn} onPress={() => setProbe(analyseCallLog())}>
           <Text style={styles.btnText}>Check repeat callers</Text>

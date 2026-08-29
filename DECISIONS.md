@@ -432,3 +432,25 @@ Because entries never move and IDs never collide, a merge conflict here is alway
   `IntentException.channel` (absent means calls, so his existing golden commands are unaffected),
   and Dhrey needs a `priority_preference` table plus a repository. Neither is blocked by this
   change; both are unblocked by it.
+
+### ADR-113 — Four enforcement states, because "saved" and "working" are different promises
+- **Date:** 2026-08-29 · **Author:** Aayush · **Phase:** 1 · **Status:** Accepted
+- **Decision:** Every priority channel reports one of four states — `enforced`,
+  `preference_only`, `unsupported`, `failed` — as `ChannelEnforcement` in the frozen contract,
+  with `ENFORCEMENT_PRESENTATION` supplying the UI copy so screens cannot invent their own.
+  `setPriority` returns a per-channel breakdown rather than one boolean.
+- **Reason:** A single `ok` cannot express what actually happened here. Calls and SMS are
+  applied to Android and read back; WhatsApp is stored and never sent to the device at all.
+  Both would report `ok: true`, and a UI built on that would tell the user their WhatsApp
+  preference was active. `preference_only` exists precisely so that sentence is impossible to
+  write by accident. It is the same reasoning as the truthful action-status vocabulary in
+  `STATUS_PRESENTATION`, applied one level up to channels.
+- **Alternatives considered:** Reuse `ActionStatus` — it has no state meaning "we saved this but
+  the platform cannot act on it", and stretching `skipped` to cover that would hide exactly the
+  distinction worth surfacing. Return `ok` plus per-channel booleans — encodes the same
+  information while letting callers ignore it, which is how the honest case gets dropped.
+- **Impact:** `enforced` is only returned after a policy read-back confirms Android held the
+  change, so it means the phone will genuinely behave differently. `preference_only` is
+  hard-coded for WhatsApp and cannot be reached by a successful device call. The permission and
+  unsupported paths carry the same breakdown, so a caller never has to guess which channels were
+  affected by a failure.

@@ -6,7 +6,13 @@
  * src/native/index.ts to fall back to MockDevice.
  */
 
-import type { Capability, DeviceCapability, DeviceRegistry, PermissionRequirement } from '../types';
+import type {
+  Capability,
+  ChannelEnforcement,
+  DeviceCapability,
+  DeviceRegistry,
+  PermissionRequirement,
+} from '../types';
 import AllyNative, { type AllyNativeDeviceInfo } from '../../modules/ally-native';
 import { createNativeCapabilities } from './capabilities';
 
@@ -56,9 +62,19 @@ export function applyPriorityPreferences(prefs: {
   sms: boolean;
   whatsapp?: boolean;
   repeatCallers?: boolean;
-}): Record<string, unknown> | null {
+}): { ok: boolean; channels: ChannelEnforcement[] } | null {
   if (!AllyNative) return null;
-  return AllyNative.dndSetPriority(prefs.calls, prefs.repeatCallers ?? true, prefs.sms);
+
+  const raw = AllyNative.dndSetPriority(prefs.calls, prefs.repeatCallers ?? true, prefs.sms);
+  const rows = Array.isArray(raw.channels) ? (raw.channels as Record<string, unknown>[]) : [];
+
+  const channels: ChannelEnforcement[] = rows.map((r) => ({
+    channel: String(r.channel) as ChannelEnforcement['channel'],
+    status: String(r.status) as ChannelEnforcement['status'],
+    message: String(r.message),
+  }));
+
+  return { ok: raw.ok === true, channels };
 }
 
 /** Priority-caller exception + Android's repeat-caller bypass (ADR-107). */

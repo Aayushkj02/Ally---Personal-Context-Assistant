@@ -112,6 +112,13 @@ object DndController {
       return mapOf(
         "ok" to false, "reason" to "permission",
         "message" to "Do Not Disturb access is needed before Ally can change this.",
+        "channels" to listOf("calls", "sms").map {
+          mapOf("channel" to it, "status" to "failed",
+            "message" to "Do Not Disturb access is needed before Ally can change this.")
+        } + listOf(
+          mapOf("channel" to "whatsapp", "status" to "preference_only",
+            "message" to "Ally remembers this. Android cannot let Ally control WhatsApp notifications."),
+        ),
       )
     }
     rememberPolicy(manager)
@@ -142,7 +149,47 @@ object DndController {
           after.priorityMessageSenders == NotificationManager.Policy.PRIORITY_SENDERS_STARRED)
 
       val ok = callsHeld && repeatHeld && starredHeld && messagesHeld
+
+      // Per-channel outcome. "Saved your setting" and "your phone will behave differently"
+      // are different promises and are reported as such (ADR-113).
+      val channels = listOf(
+        mapOf(
+          "channel" to "calls",
+          "status" to when {
+            !allowStarred -> "unsupported"
+            callsHeld && starredHeld -> "enforced"
+            else -> "failed"
+          },
+          "message" to when {
+            !allowStarred -> "Priority calls were not requested."
+            callsHeld && starredHeld -> "Starred contacts can call you."
+            else -> "Android did not hold the priority-call policy."
+          },
+        ),
+        mapOf(
+          "channel" to "sms",
+          "status" to when {
+            !allowMessages -> "unsupported"
+            messagesHeld -> "enforced"
+            else -> "failed"
+          },
+          "message" to when {
+            !allowMessages -> "Priority messages were not requested."
+            messagesHeld -> "Starred contacts can message you."
+            else -> "Android did not hold the priority-message policy."
+          },
+        ),
+        mapOf(
+          // Always preference_only. Android exposes no per-app DND bypass publicly, so this
+          // is never sent to the device and must never be reported as enforced (ADR-111).
+          "channel" to "whatsapp",
+          "status" to "preference_only",
+          "message" to "Ally remembers this. Android cannot let Ally control WhatsApp notifications.",
+        ),
+      )
+
       mapOf(
+        "channels" to channels,
         "ok" to ok,
         "reason" to if (ok) null else "mismatch",
         "starredCallsAllowed" to callsHeld,
