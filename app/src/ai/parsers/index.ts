@@ -3,8 +3,6 @@
  *
  * Every parser implements the SAME interface, so `src/ai/index.ts` can swap between
  * them without the rest of the app noticing (FLOW.md §3).
- *
- * Add one file per parser here: OllamaParser.ts (S2), FallbackParser.ts (S3).
  */
 
 import type { ParseResult } from '../../types';
@@ -20,5 +18,8 @@ export interface IntentParser {
   readonly name: 'ollama' | 'fallback';
   /** Ollama checks the bridge; the fallback parser always returns true. */
   isAvailable(): Promise<boolean>;
-  parse(text: string, ctx?: ParseContext): Promise<ParseResult>;
+  parse(text: string, ctx?: ParseContext): Promise<ParseResult | null>;
 }
+
+export { FallbackParser } from './FallbackParser';
+export { OllamaParser } from './OllamaParser';
