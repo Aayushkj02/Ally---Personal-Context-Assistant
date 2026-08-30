@@ -80,9 +80,18 @@ export interface AllyNativeSpec {
   brightnessApply(
     percent: number,
   ): NativeApplyResult & { beforeRaw: number | null; afterRaw: number | null };
-  brightnessRestore(
-    percent: number,
-  ): NativeApplyResult & { beforeRaw: number | null; afterRaw: number | null };
+  /**
+   * `exact` is the A-V2 proof (ADR-116): true when the raw value captured at snapshot time was
+   * still on disk and written back verbatim, false when it had to be reconstructed from the
+   * percent and may be a raw unit off. It reports what the store held, never what the result
+   * looked like.
+   */
+  brightnessRestore(percent: number): NativeApplyResult & {
+    beforeRaw: number | null;
+    afterRaw: number | null;
+    exact: boolean;
+    restoredRaw: number;
+  };
 
   // Repeated-caller DETECTION only. Never changes DND, never makes anything ring (ADR-109).
   callLogHasPermission(): boolean;

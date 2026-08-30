@@ -21,9 +21,15 @@ import {
   applyPriorityPreferences,
   analyseCallLog,
 } from './src/native';
-import { executePlan, summarisePlan, createRepositorySnapshotStore } from './src/actions';
+import {
+  executePlan,
+  restoreSession,
+  summarisePlan,
+  summariseRestore,
+  createRepositorySnapshotStore,
+} from './src/actions';
 import { activateFromText } from './src/services/contextOrchestrator';
-import { ensureSeeded } from './src/memory';
+import { ensureSeeded, getActiveContext, markSessionActive, endSession } from './src/memory';
 
 /**
  * A-V1: the real Phase 2 sentence. Not a fixture — this string goes through Shlok's parser,
@@ -130,6 +136,13 @@ export default function App() {
       });
 
       const summary = summarisePlan(results);
+
+      // READY -> ACTIVE, and only once something actually changed. The executor reports the
+      // state; moving the row is the caller's job and a database write (ADR-115).
+      if (summary.state === 'ACTIVE' || summary.state === 'PARTIAL') {
+        await markSessionActive(outcome.plan.sessionId);
+      }
+
       setLog(results.slice().reverse());
       setProbe({
         verdict: `${summary.state} — ${summary.byStatus.applied}/${summary.total} applied`,
@@ -143,6 +156,53 @@ export default function App() {
       await refresh();
     } catch (e) {
       setProbe({ verdict: 'run failed', error: e instanceof Error ? e.message : String(e) });
+    }
+  }, [refresh]);
+
+  /**
+   * A-V2: end the context and put the phone back.
+   *
+   * The session id is read from the DATABASE, not from React state, which is the whole point:
+   * after the app has been force-stopped and reopened there is no React state left, and the
+   * restore still has to work.
+   */
+  const endContext = useCallback(async () => {
+    setProbe({ verdict: 'ending context…' });
+
+    try {
+      await ensureSeeded();
+      const active = await getActiveContext();
+      if (!active) {
+        setProbe({ verdict: 'no active context to end' });
+        return;
+      }
+
+      const snapshots = createRepositorySnapshotStore();
+      const before = await snapshots.forSession(active.session.id);
+
+      const results = await restoreSession(active.session.id, { registry: device, snapshots });
+      const summary = summariseRestore(results);
+
+      // Clean sweep only. A partial restore keeps its rows so the user can retry (ADR-117).
+      if (summary.safeToClear) await snapshots.clear(active.session.id);
+      await endSession(active.session.id, { status: summary.state });
+
+      setLog(results.slice().reverse());
+      setProbe({
+        verdict: `restore ${summary.state} — ${summary.byStatus.restored}/${summary.total} restored`,
+        session: active.session.id,
+        snapshots: before.map((r) => `${r.capability}=${String(r.previousValue)}`).join('  '),
+        ...Object.fromEntries(
+          results.map((r, i) => [
+            `${i + 1}. ${r.capability}`,
+            `${r.status} — ${String(r.beforeValue)} → ${String(r.afterValue)}`,
+          ]),
+        ),
+        cleared: String(summary.safeToClear),
+      });
+      await refresh();
+    } catch (e) {
+      setProbe({ verdict: 'restore failed', error: e instanceof Error ? e.message : String(e) });
     }
   }, [refresh]);
 
@@ -198,6 +258,13 @@ export default function App() {
       <Pressable style={[styles.btn, styles.btnProbe]} onPress={() => void runStudyPlan()}>
         <Text style={styles.btnText}>Run the Study sentence</Text>
       </Pressable>
+      <Pressable style={[styles.btn, styles.btnProbe]} onPress={() => void endContext()}>
+        <Text style={styles.btnText}>End context (restore)</Text>
+      </Pressable>
+      <Text style={styles.info}>
+        End context reads the session from the database, so it still works after the app has been
+        force-stopped and reopened. That is the A-V2 proof.
+      </Text>
 
       <View style={styles.divider} />
       <Text style={styles.section}>Brightness (T4)</Text>

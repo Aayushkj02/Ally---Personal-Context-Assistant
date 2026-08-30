@@ -232,26 +232,55 @@ because an action that never ran has nothing to restore.
 
 ## 6. Restoration & override expiry — *Aayush*
 
-⬜ *Phase 3. The product's centerpiece.*
+✅ *Phase 2 — A-V2 landed: `restoreSession()` puts the device back, exactly, across process
+death. Override expiry is still ⬜ Phase 3.*
 
 **Ending a context:**
 
 ```
 "I'm done studying"
-   → mark session ENDED
-   → cancel this session's temporary overrides
+   → read the session from SQLite (NOT from React state — it may not exist any more)
    → load DeviceSnapshot rows for the session
    → restore in LIFO order (reverse of application)
    → verify each restore by read-back
-   → any failure ⇒ session status PARTIAL, snapshot rows retained for retry
+   → summariseRestore() ⇒ IDLE (clean) | PARTIAL (anything less)
+   → clean ⇒ caller may clear the rows;  otherwise they are RETAINED for retry
+   → caller calls endSession(sessionId, { status })
 ```
 
-Restoration is driven entirely by persisted snapshots, never by recomputing "what Study probably
-changed". If the app was killed mid-session the snapshots survive in SQLite, so reopening still
-offers a correct restore.
+`restoreSession(sessionId, deps)` is driven **entirely by persisted snapshots**, never by
+recomputing "what Study probably changed". A capability that never executed wrote no row, so it
+is never restored and nothing has to special-case it — `ringer` reporting `not_supported` at
+apply time simply does not appear at restore time.
+
+**LIFO, with ties settled deliberately** (ADR-117). Capture order is application order, because
+the executor snapshots immediately before each write, so reversing the stored array is the
+reverse of application. `capturedAt` is a millisecond clock, though, and two captures in the same
+millisecond compare equal — reachable any time a test injects a frozen clock. So `lifoOrder()`
+reverses first and then applies a *stable* sort: equal timestamps keep reverse-storage order
+rather than falling back to whatever the database happened to return. Ordering is never left to
+chance.
+
+**One failure never aborts the walk.** A phone that refuses to put brightness back must still get
+its Do Not Disturb turned off.
+
+**Snapshots are retained unless the restore was clean.** `restoreSession()` never deletes
+anything — that is a database write this layer must not perform, and the rows *are* the retry.
+The caller reads `summariseRestore().safeToClear` and calls `SnapshotStore.clear()` only on a
+clean sweep. A retry after the user re-grants a permission finishes the job exactly.
 
 Capabilities with no restorable prior state — the alarm — return `skipped` rather than being
-"un-set". An alarm the user asked for is not collateral of the context.
+"un-set". An alarm the user asked for is not collateral of the context, so `skipped` counts as a
+clean outcome.
+
+**Exactness survives the process dying** (ADR-116). The contract carries brightness as a percent,
+but Android stores a raw 0..255 value and `raw → percent → raw` loses up to a unit: 187 reports as
+73%, and 73% converts back to 186. `BrightnessController` therefore keeps the exact raw value and
+the user's original brightness mode in **SharedPreferences**, written with `commit()` rather than
+`apply()`, because the scenario being defended against is the process dying before an async flush
+lands. A context routinely outlives its process — start Study, Android kills the app, reopen an
+hour later and end it — and an in-heap cache is empty by then. The percent conversion remains only
+as a genuine last resort, and `brightnessRestore()` reports `exact: false` when it had to use it.
 
 **Override expiry** is evaluated lazily at resolve time (§4) and surfaced by a scheduled local
 notification for the user-visible countdown. No always-on background service (NFR-09).

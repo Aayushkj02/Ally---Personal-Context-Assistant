@@ -28,6 +28,7 @@ import {
   __setMockPermission,
   __resetMockState,
   __getMockState,
+  __getMockBrightnessPercent,
 } from '../../native/MockDevice';
 import { executePlan, summarisePlan, createInMemorySnapshotStore, snapshotId } from '../index';
 
@@ -144,7 +145,7 @@ describe('1. capability selection', () => {
 
     expect(results).toEqual([]);
     expect(__getMockState().dnd).toBe('off');
-    expect(__getMockState().brightness).toBe(80);
+    expect(__getMockBrightnessPercent()).toBe(73);
   });
 });
 
@@ -226,10 +227,10 @@ describe('3. permission gate', () => {
     );
 
     expect(results[0]?.status).toBe('permission_needed');
-    expect(__getMockState().brightness).toBe(80);
+    expect(__getMockBrightnessPercent()).toBe(73);
     // before === after is the visible proof to the user that nothing moved (ADR-007).
-    expect(results[0]?.beforeValue).toBe(80);
-    expect(results[0]?.afterValue).toBe(80);
+    expect(results[0]?.beforeValue).toBe(73);
+    expect(results[0]?.afterValue).toBe(73);
   });
 
   it('does not capture a snapshot for an action it refused to run', async () => {
@@ -365,7 +366,7 @@ describe('5. successful execution', () => {
 
     expect(results.map((r) => r.status)).toEqual(['applied', 'applied']);
     expect(__getMockState().dnd).toBe('priority');
-    expect(__getMockState().brightness).toBe(40);
+    expect(__getMockBrightnessPercent()).toBe(40);
     expect(results[0]?.beforeValue).toBe('off');
     expect(results[0]?.afterValue).toBe('priority');
     expect(summarisePlan(results).state).toBe('ACTIVE');
