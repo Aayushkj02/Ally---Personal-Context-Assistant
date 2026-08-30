@@ -84,7 +84,7 @@ intent engine and the policy engine, `ActionPlan` between the policy engine and 
 
 ## 3. Intent pipeline — *Shlok*
 
-⬜ *Phase 1–2.*
+✅ *Phase 1–2.*
 
 ```
 speech ──► on-device STT ──► raw text
@@ -251,7 +251,7 @@ phone is fully functional standalone.
 
 ## 9. Error & degradation paths — *Shlok*
 
-⬜ *Phase 1–3.*
+✅ *Phase 1–3.*
 
 The system degrades in layers. Each layer failing costs a capability, never the product.
 

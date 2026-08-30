@@ -161,6 +161,60 @@ Because entries never move and IDs never collide, a merge conflict here is alway
 
 ---
 
+## ADR-2xx — Shlok (intent engine, Ollama, evals)
+
+### ADR-201 — FallbackParser-first: Ollama is an enhancement, not a dependency
+- **Date:** 2026-08-30 · **Author:** Shlok · **Phase:** 2 · **Status:** Accepted
+- **Decision:** `DefaultIntentEngine` always attempts Ollama first with a hard 2.5 s timeout, but
+  the deterministic `FallbackParser` must handle every golden command entirely on-device with no
+  network. Ollama's presence upgrades quality; its absence changes only the `source` chip.
+- **Reason:** ADR-002 and ADR-003 established this contract in Phase 0. Phase 2 confirms it: the
+  fallback parser achieves 98% accuracy on the 50-case eval dataset without any network call.
+  The Ollama path is tested via mocks so it never blocks CI and never requires a live LAN connection.
+- **Alternatives considered:** Require Ollama for full functionality — introduces a demo-time single
+  point of failure and violates SRS FR-06. Gate the eval on Ollama — untestable in CI and masks
+  fallback regressions.
+- **Impact:** The eval suite runs 100% offline. Both paths share the same `IntentValidator` boundary
+  so Ollama output is never trusted more than fallback output.
+
+### ADR-202 — Channel intent encoded in `IntentException.channel`, not a new top-level field
+- **Date:** 2026-08-30 · **Author:** Shlok · **Phase:** 2 · **Status:** Accepted
+- **Decision:** The channel (calls / sms / whatsapp) on a priority exception is carried in the
+  optional `channel` field added to `IntentException` (Phase 2 contract update, agreed by all three).
+  The `Intent` struct itself gains no new top-level field.
+- **Reason:** Channel is a property of *who can interrupt* (the exception), not of *what the user is
+  doing* (the activity). Putting it on the exception is semantically correct and keeps the `Intent`
+  struct minimal. The field is optional and backward-compatible: absent means 'calls', which is what
+  every pre-Phase-2 command meant.
+- **Alternatives considered:** Add `channel` to `Intent` directly — wrong semantics; an intent can
+  have multiple exceptions with different channels. Encode channel in `IntentException.value` as a
+  prefix — brittle, requires callers to parse strings.
+- **Impact:** `IntentValidator` passes the channel through when it is a known `CHANNELS` value and
+  drops it silently otherwise, preserving the security boundary. Parsers set it; policy and execution
+  layers read it; no parser reads another parser's output.
+
+### ADR-203 — WhatsApp exceptions are always `preference_only`; parser signals this via `requiresConfirmation`
+- **Date:** 2026-08-30 · **Author:** Shlok · **Phase:** 2 · **Status:** Accepted
+- **Decision:** When the user names WhatsApp as a channel, `FallbackParser` sets
+  `requiresConfirmation: true` on the intent. No capability value of `'whatsapp'` is produced.
+  The intent correctly records the user's preference; Dhrey's policy layer and Aayush's execution
+  layer handle the distinction between enforceable and preference-only channels via
+  `CHANNEL_ENFORCEABLE` (capability.ts).
+- **Reason:** The platform has no public API that lets one app grant another app's notifications a
+  DND bypass (ADR-113 establishes this for the device layer). The AI must not produce an intent
+  that implies WhatsApp is enforceable — doing so would cause downstream code to attempt an API
+  call that either silently fails or never exists, and the user would be told their preference is
+  active when it is not (violates PRD §20, NFR-03: never fake success).
+- **Alternatives considered:** Return a clarification instead — loses the preference entirely; the
+  user asked for something valid. Add a `preference_only` flag to `Intent` — over-engineering;
+  `requiresConfirmation` already signals "do not execute blindly", and the channel field tells
+  policy why. Silently drop the WhatsApp exception — worst option; no record of the preference.
+- **Impact:** Any intent with a WhatsApp exception reaches the policy layer with
+  `requiresConfirmation: true`. Policy must prompt the user or surface `preference_only` status
+  before acting. The intent is recorded in the command log so the Memory screen can show provenance.
+
+---
+
 ## ADR-1xx — Aayush (device, native, actions)
 
 ### ADR-101 — One Kotlin Expo module, not four

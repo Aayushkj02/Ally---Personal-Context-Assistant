@@ -1,18 +1,58 @@
 import type { IntentParser, ParseContext } from './index';
 
-import { EMPTY_INTENT, type Intent, type ParseResult } from '../../types';
+import { EMPTY_INTENT, type Channel, type Intent, type ParseResult } from '../../types';
+
+/** Written-out number words that appear in duration phrases. */
+const WORD_TO_NUMBER: Record<string, number> = {
+  one: 1,
+  two: 2,
+  three: 3,
+  four: 4,
+  five: 5,
+  six: 6,
+  seven: 7,
+  eight: 8,
+  nine: 9,
+  ten: 10,
+  fifteen: 15,
+  twenty: 20,
+  thirty: 30,
+  forty: 40,
+  sixty: 60,
+  ninety: 90,
+};
 
 function extractDurationMinutes(text: string): number | null {
-  const hoursMatch = text.match(/(\d+(?:\.\d+)?)\s*(?:hours?|hrs?)/i);
-
-  if (hoursMatch) {
-    return Math.round(Number(hoursMatch[1]) * 60);
+  // Numeric hours
+  const numericHoursMatch = text.match(/(\d+(?:\.\d+)?)\s*(?:hours?|hrs?)/i);
+  if (numericHoursMatch) {
+    return Math.round(Number(numericHoursMatch[1]) * 60);
   }
 
-  const minutesMatch = text.match(/(\d+)\s*(?:minutes?|mins?)/i);
+  // Written-out hours: "two hours", "three hours"
+  const wordHoursMatch = text.match(
+    /\b(one|two|three|four|five|six|seven|eight|nine|ten|fifteen|twenty|thirty|forty|sixty|ninety)\s+hours?\b/i,
+  );
+  if (wordHoursMatch) {
+    const word = wordHoursMatch[1]?.toLowerCase() ?? '';
+    const num = WORD_TO_NUMBER[word];
+    if (num !== undefined) return num * 60;
+  }
 
-  if (minutesMatch) {
-    return Number(minutesMatch[1]);
+  // Numeric minutes
+  const numericMinutesMatch = text.match(/(\d+)\s*(?:minutes?|mins?)/i);
+  if (numericMinutesMatch) {
+    return Number(numericMinutesMatch[1]);
+  }
+
+  // Written-out minutes: "twenty minutes"
+  const wordMinutesMatch = text.match(
+    /\b(one|two|three|four|five|six|seven|eight|nine|ten|fifteen|twenty|thirty|forty|sixty|ninety)\s+minutes?\b/i,
+  );
+  if (wordMinutesMatch) {
+    const word = wordMinutesMatch[1]?.toLowerCase() ?? '';
+    const num = WORD_TO_NUMBER[word];
+    if (num !== undefined) return num;
   }
 
   return null;
@@ -154,37 +194,114 @@ function extractRequestedChanges(text: string): Intent['requestedChanges'] {
   return changes;
 }
 
-function extractExceptions(text: string): Intent['exceptions'] {
+/**
+ * Detects the communication channel from phrasing like "call", "SMS", "message",
+ * "WhatsApp". Defaults to 'calls' when no channel word is present (backward-compatible
+ * with existing golden commands that say "let parents through" without a channel noun).
+ */
+function detectChannel(text: string): Channel {
+  if (text.includes('whatsapp')) {
+    return 'whatsapp';
+  }
+  if (
+    text.includes(' sms') ||
+    text.includes('text') ||
+    text.includes('message') ||
+    text.includes('messages')
+  ) {
+    return 'sms';
+  }
+  return 'calls';
+}
+
+/**
+ * @param rawText   Original user text (preserves capitalisation for contact names).
+ * @param normalized  Lowercased version (used for keyword matching).
+ */
+function extractExceptions(rawText: string, normalized: string): Intent['exceptions'] {
   const exceptions: Intent['exceptions'] = [];
 
-  const durationMinutes = extractDurationMinutes(text);
+  const durationMinutes = extractDurationMinutes(normalized);
+  const text = normalized; // keyword matching always on lowercase
 
-  // Parents / family
+  // ── Group exceptions ─────────────────────────────────────────────────────
+
+  // Parents / family group
   if (
     text.includes('let my parents') ||
     text.includes('allow my parents') ||
-    text.includes('parents can call')
+    text.includes('parents can call') ||
+    text.includes('allow calls from parents') ||
+    text.includes('allow my parents')
   ) {
     exceptions.push({
       type: 'contactGroup',
       value: 'parents',
+      channel: detectChannel(text),
       effect: 'allow',
       durationMinutes,
     });
   }
 
-  // Project group
+  // Project group (calls, SMS, or WhatsApp)
   if (
     text.includes('let my project group') ||
     text.includes('allow my project group') ||
-    text.includes('project group can notify')
+    text.includes('project group can notify') ||
+    text.includes('let project group') ||
+    text.includes('allow project group') ||
+    text.includes('let my project whatsapp group') ||
+    text.includes('project whatsapp group')
   ) {
+    const projectChannel = detectChannel(text);
     exceptions.push({
       type: 'contactGroup',
       value: 'project group',
+      channel: projectChannel,
       effect: 'allow',
       durationMinutes,
     });
+  }
+
+  // ── Individual contact exceptions ────────────────────────────────────────
+  // Run contact-name patterns against rawText to preserve capitalisation
+  // ("Mom" not "mom"), but use normalised lowercase for keyword filtering.
+
+  const contactPatterns = [
+    /\blet\s+(\w+(?:'s)?)\s+(?:call|sms|text|message|whatsapp)/i,
+    /\ballow\s+(\w+(?:'s)?)\s+(?:to\s+)?(?:call|sms|text|message)/i,
+    /\b(\w+)\s+(?:can\s+)?(?:call|sms|text|message)\s+(?:me|through)/i,
+  ];
+
+  const groupKeywords = ['my', 'parents', 'family', 'project', 'group', 'whatsapp', 'the'];
+
+  for (const pattern of contactPatterns) {
+    // Match against rawText so the captured name keeps its original casing
+    const match = rawText.match(pattern);
+    if (match) {
+      const raw = match[1] ?? '';
+      // Strip possessive apostrophe-s ("Mom's" → "Mom")
+      const name = raw.replace(/'s$/i, '').trim();
+      const nameLower = name.toLowerCase();
+
+      // Skip if the captured word is a group keyword or activity word
+      if (groupKeywords.includes(nameLower) || nameLower === 'study' || nameLower === 'sleep') {
+        continue;
+      }
+
+      // Avoid duplicating a group exception we already added
+      const alreadyCaptured = exceptions.some((e) => e.value.toLowerCase() === nameLower);
+      if (alreadyCaptured) continue;
+
+      exceptions.push({
+        type: 'contact',
+        value: name, // capitalisation preserved from rawText
+        channel: detectChannel(text), // detectChannel uses normalised
+        effect: 'allow',
+        durationMinutes,
+      });
+      break; // only capture the first individual contact per sentence
+    }
   }
 
   return exceptions;
@@ -251,8 +368,10 @@ export class FallbackParser implements IntentParser {
     if (
       normalized.includes('when i study') ||
       normalized.includes('when i sleep') ||
+      normalized.includes('whenever i') ||
       normalized.includes('remember this') ||
-      normalized.includes('remember that')
+      normalized.includes('remember that') ||
+      normalized.includes('remember for')
     ) {
       operation = 'teach';
     } else if (
@@ -266,7 +385,9 @@ export class FallbackParser implements IntentParser {
       normalized.includes('stop') ||
       normalized.includes('deactivate') ||
       normalized.includes('finished') ||
-      normalized.includes('undo')
+      normalized.includes('undo') ||
+      normalized.includes('end study') ||
+      normalized.includes('end sleep')
     ) {
       operation = 'deactivate';
     } else if (
@@ -275,6 +396,15 @@ export class FallbackParser implements IntentParser {
       normalized.includes('set')
     ) {
       operation = 'modify';
+    } else if (
+      normalized.includes('let ') ||
+      normalized.includes('allow ') ||
+      normalized.includes('through')
+    ) {
+      // Exception / priority commands that don't match an explicit operation word
+      // are best modelled as a teach (persistent preference) when no session is active,
+      // or as a temporary override when a session is already active.
+      operation = ctx?.activeActivity ? 'modify' : 'teach';
     }
 
     if (activity === 'unknown') {
@@ -289,8 +419,11 @@ export class FallbackParser implements IntentParser {
     const durationMinutes = extractDurationMinutes(normalized);
     const schedule = extractSchedule(normalized);
     const requestedChanges = extractRequestedChanges(normalized);
-    const exceptions = extractExceptions(normalized);
+    const exceptions = extractExceptions(rawText, normalized);
     const confidence = calculateConfidence(activity, operation, normalized);
+
+    // WhatsApp exceptions are preference-only; surface that with requiresConfirmation.
+    const hasWhatsApp = exceptions.some((e) => e.channel === 'whatsapp');
 
     const intent: Intent = {
       ...EMPTY_INTENT,
@@ -303,7 +436,7 @@ export class FallbackParser implements IntentParser {
       rawText,
       source: 'fallback',
       confidence,
-      requiresConfirmation: confidence < 0.7,
+      requiresConfirmation: hasWhatsApp || confidence < 0.7,
     };
 
     return {
