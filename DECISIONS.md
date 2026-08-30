@@ -565,3 +565,61 @@ Because entries never move and IDs never collide, a merge conflict here is alway
   Dhrey's guarantee per docs/CONTRACTS.md §2, so the executor never reorders — for the Study plan
   the three actions are independent and order is irrelevant, but no flag distinguishes that case
   from one where it matters.
+
+### ADR-116 — The exact brightness snapshot lives on disk, not in the heap
+- **Date:** 2026-08-31 · **Author:** Aayush · **Phase:** 2 · **Status:** Accepted
+- **Decision:** `BrightnessController` persists the exact raw `SCREEN_BRIGHTNESS` value (keyed by
+  the percent it reports as) and the user's original `SCREEN_BRIGHTNESS_MODE` to
+  SharedPreferences, written with `commit()` rather than `apply()`. `restore(percent)` reads the
+  stored raw value and writes it back verbatim; converting the percent is a fallback only, and the
+  result reports `exact: false` when that fallback was used. `CapabilityValue` stays a plain
+  percent — no frozen-contract change.
+- **Reason:** ADR-110 established that restoring the percent loses up to one raw unit: 187 reports
+  as 73%, and 73% converts back to 186. The fix at the time was an in-memory `HashMap`, which is
+  correct exactly as long as the process lives. It does not. A context routinely outlives its
+  process — the user starts Study, Android kills the app under memory pressure, they reopen it and
+  end the context an hour later — and by then the map is empty and restore silently returns 186.
+  That is the quiet lie this codebase exists to prevent, and it is worse than a loud failure
+  because nothing reports it: the write succeeds, the read-back confirms 186, and every status is
+  green while the user's setting is gone. `commit()` over `apply()` because the very scenario being
+  defended against is the process dying before an async flush completes.
+- **Alternatives considered:** Widen `CapabilityValue` or `DeviceSnapshot` to carry the raw value —
+  a frozen-contract change (ADR-006) that would leak an Android storage detail into a type Shlok
+  and Dhrey both consume, and would put a number the Memory screen cannot render into user-facing
+  provenance. Encode `"73:187"` into the percent string — same leak, plus every consumer now has to
+  parse it. Store the raw value in `device_snapshot` — that is Dhrey's table and the action engine
+  does not write SQL. SharedPreferences is inside the Aayush module, invisible above the capability
+  boundary, and costs one file.
+- **Impact:** The mode is cleared after a successful exact restore, so the next context captures
+  the user's mode fresh rather than pinning them to a stale one. `MockDevice` models the raw/percent
+  split for the same reason (ADR-007 parity), which is what lets the 187 → 40% → process death →
+  187 case be tested with no phone attached.
+
+### ADR-117 — Restore is snapshot-driven, LIFO with deterministic ties, and never self-clearing
+- **Date:** 2026-08-31 · **Author:** Aayush · **Phase:** 2 · **Status:** Accepted
+- **Decision:** `restoreSession(sessionId, deps)` walks only persisted snapshots, in LIFO order,
+  and returns one `ActionResult` per row using the existing vocabulary. `lifoOrder()` reverses the
+  stored array and then applies a *stable* sort by `capturedAt` descending, so equal timestamps
+  fall back to reverse-storage order. `summariseRestore()` reports `IDLE` when every row came back
+  (counting `skipped` as clean) and `PARTIAL` otherwise, plus `safeToClear`. The function never
+  deletes a snapshot and never writes the session row.
+- **Reason:** Driving restore from stored rows rather than from the plan is what makes it work
+  after a process death — there is no plan in memory to consult — and it means an action that
+  never executed is never restored, with no special case, because nothing was ever written for it.
+  On ties: `capturedAt` is a millisecond clock and SQL leaves equal keys unordered, so a frozen
+  test clock, or simply a fast device, would make restore order depend on the database's whim;
+  reversing before a stable sort removes that. On retention: the rows ARE the retry. Deleting them
+  after a partial restore would strand the user with a half-changed phone and no way back, so
+  clearing is offered to the caller and gated on a clean sweep. `IDLE`/`PARTIAL` are not new
+  states — `endSession()` already takes exactly those, and already documents "Pass PARTIAL when a
+  restore did not fully succeed, so the snapshots stay meaningful for a retry".
+- **Alternatives considered:** Restore from the `ActionPlan` — unavailable after a restart, which
+  is the case that matters most. Clear rows automatically on success — convenient until "success"
+  is partial, and the executor deleting rows is a database write this layer must not perform. Add
+  an `ERROR` restore state — a restore that half-worked is unfinished business with rows still on
+  disk, not something to discard, and `PARTIAL` says exactly that. Sort ties by capability name —
+  deterministic but arbitrary, and unrelated to the order things were actually applied.
+- **Impact:** An empty session restores nothing and reports `IDLE`; there was nothing to put back.
+  A permission revoked mid-context yields `PARTIAL` with every row retained, and re-granting it and
+  running restore again finishes the job exactly. The caller remains responsible for
+  `markSessionActive()` and `endSession()`, unchanged from ADR-115.

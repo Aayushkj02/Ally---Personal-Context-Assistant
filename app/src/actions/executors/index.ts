@@ -28,6 +28,7 @@ import type {
   Capability,
   DeviceCapability,
   DeviceRegistry,
+  DeviceSnapshot,
   PlannedAction,
 } from '../../types';
 import { isCapability } from '../../types';
@@ -217,6 +218,146 @@ export async function executePlan(plan: ActionPlan, deps: ExecutionDeps): Promis
       result,
       declaredPermissionMismatch,
     });
+  }
+
+  return results;
+}
+
+// ---------------------------------------------------------------------------
+// A-V2 — restore
+// ---------------------------------------------------------------------------
+
+export interface RestoreDeps {
+  /** Same rule as execution: the executor is handed a device, it never reaches for one. */
+  registry: DeviceRegistry;
+  /** Where the pre-change values were recorded. Required — there is nothing to restore without it. */
+  snapshots: SnapshotStore;
+  onProgress?: (event: ActionProgress) => void;
+}
+
+/**
+ * LIFO: undo in the reverse of the order things were applied.
+ *
+ * Snapshots arrive in capture order (`ORDER BY capturedAt ASC`), and capture order is application
+ * order because the executor snapshots immediately before each write. Reversing that array is
+ * therefore the reverse of application, which is what §6 asks for.
+ *
+ * TIES: `capturedAt` is a millisecond clock, so two captures in the same millisecond — reachable
+ * whenever a test injects a frozen clock, and not impossible on a fast device — compare equal, and
+ * SQL leaves their relative order unspecified. So the reversal is done FIRST and the sort is a
+ * stable sort applied to the already-reversed array: equal timestamps keep reverse-storage order
+ * rather than falling back to whatever the database happened to return. Order is never left to
+ * chance, even when the clock cannot distinguish two rows.
+ */
+export function lifoOrder(snapshots: DeviceSnapshot[]): DeviceSnapshot[] {
+  return [...snapshots].reverse().sort((a, b) => b.capturedAt - a.capturedAt);
+}
+
+/**
+ * Puts the device back the way the user had it.
+ *
+ * Driven ENTIRELY by persisted snapshots, never by recomputing "what Study probably changed"
+ * (FLOW.md §6). That is why a capability which never executed is never restored: no row was
+ * written for it, so there is nothing to walk. `ringer` reporting `not_supported` at apply time
+ * simply does not appear here, and nothing has to special-case it.
+ *
+ * One failure never aborts the walk — a phone that refuses to put brightness back must still get
+ * its Do Not Disturb turned off.
+ *
+ * Snapshots are NOT cleared here even on success. Deleting them is a database write, which this
+ * layer must not perform, and keeping them is what makes a partial restore retryable. The caller
+ * inspects `summariseRestore()` and calls `SnapshotStore.clear()` only on a clean sweep (ADR-117).
+ */
+export async function restoreSession(
+  sessionId: string,
+  deps: RestoreDeps,
+): Promise<ActionResult[]> {
+  const { registry, snapshots, onProgress } = deps;
+  const rows = lifoOrder(await snapshots.forSession(sessionId));
+
+  const results: ActionResult[] = [];
+
+  for (const [index, row] of rows.entries()) {
+    const emit = (phase: ActionPhase, result: ActionResult | null): void =>
+      onProgress?.({
+        index,
+        capability: row.capability,
+        phase,
+        result,
+        declaredPermissionMismatch: false,
+      });
+
+    emit('pending', null);
+    emit('running', null);
+
+    const settle = (result: ActionResult): void => {
+      results.push(result);
+      emit('settled', result);
+    };
+
+    // A row with no previous value is a capability that had nothing restorable when it was
+    // applied. Never written by executePlan(), but a stored row is user data and gets a truthful
+    // answer rather than a guess.
+    if (row.previousValue === null) {
+      settle(resultFor(row.capability, 'skipped', 'There was no earlier value to put back.', null));
+      continue;
+    }
+
+    if (!isCapability(row.capability)) {
+      settle(
+        resultFor(
+          row.capability,
+          'not_supported',
+          `Ally does not know how to change "${String(row.capability)}".`,
+        ),
+      );
+      continue;
+    }
+
+    let capability: DeviceCapability;
+    try {
+      capability = registry.get(row.capability);
+    } catch {
+      settle(
+        resultFor(row.capability, 'not_supported', 'This is not available on your phone.', null),
+      );
+      continue;
+    }
+
+    try {
+      if (!(await capability.isAvailable())) {
+        settle(
+          resultFor(row.capability, 'not_supported', 'This is not available on your phone.', null),
+        );
+        continue;
+      }
+
+      // Same gate as apply, for the same reason: a denied permission must leave the device
+      // untouched rather than half-restored.
+      const required = await capability.requiredPermissions();
+      const missing = required.filter((p) => !p.granted);
+      if (missing.length > 0) {
+        const current = await capability.snapshot();
+        settle({
+          capability: row.capability,
+          status: 'permission_needed',
+          beforeValue: current,
+          afterValue: current,
+          message: `${missing[0]?.label ?? 'A permission'} is needed before Ally can change this.`,
+        });
+        continue;
+      }
+
+      settle(await capability.restore(row.previousValue));
+    } catch (e) {
+      settle(
+        resultFor(
+          row.capability,
+          'failed',
+          e instanceof Error ? e.message : 'This change did not go through.',
+        ),
+      );
+    }
   }
 
   return results;
