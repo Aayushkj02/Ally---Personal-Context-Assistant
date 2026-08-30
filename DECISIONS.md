@@ -508,3 +508,60 @@ Because entries never move and IDs never collide, a merge conflict here is alway
   hard-coded for WhatsApp and cannot be reached by a successful device call. The permission and
   unsupported paths carry the same breakdown, so a caller never has to guess which channels were
   affected by a failure.
+
+### ADR-114 — The action engine records snapshots through a port, not a repository call
+- **Date:** 2026-08-31 · **Author:** Aayush · **Phase:** 2 · **Status:** Accepted
+- **Decision:** `executePlan()` writes pre-change values through a `SnapshotStore` interface in
+  `app/src/actions/SnapshotStore.ts`, carrying the frozen `DeviceSnapshot` row. Dhrey's existing
+  `snapshotRepository` is wired in by `snapshotStoreAdapter.ts`, which is the only file in the
+  action engine that knows a database exists and is NOT imported by the executor. `save()` is
+  idempotent per `(sessionId, capability)` and the FIRST value written wins.
+- **Reason:** Two constraints meet here. `device_snapshot` is Dhrey's table, and an executor that
+  called the repository directly would put two owners in one code path and make every executor
+  test need SQLite. A port satisfies both while creating no second table, no second row type and
+  no second persistence mechanism — the repository is used exactly as published.
+  First-write-wins is not a tie-breaker: re-snapshotting a capability mid-session replaces the
+  user's original value with one Ally itself set, and restore then puts back Ally's own change.
+  That is the bug ADR-110 records, expressed as a key collision so it cannot recur — the row id
+  is `sessionId:capability`, which is the table's PRIMARY KEY.
+- **Alternatives considered:** Call `snapshotRepository` from the executor — crosses the ownership
+  boundary and drags SQLite into every unit test. Return snapshots from `executePlan()` and let
+  the caller persist them — the caller can forget, and a plan that dies mid-run loses everything
+  already applied. Keep them in module state — untestable and unclearable.
+- **Impact:** Verified on device: a Study run wrote `dnd → "off"` and `brightness → 73` into
+  `device_snapshot`, and `ringer` correctly produced no row because the action never ran. Capture
+  is done; nothing READS these back yet. Restoration is A-V2/Phase 3 and is not claimed here.
+
+### ADR-115 — The executor is handed a device; plan-level state reuses `SessionState`
+- **Date:** 2026-08-31 · **Author:** Aayush · **Phase:** 2 · **Status:** Accepted
+- **Decision:** Three rules for `executePlan(plan, deps)`. First, `deps.registry` is a REQUIRED
+  `DeviceRegistry` — the executor never imports `src/native` and never reaches for the phone
+  itself. Second, progress is reported through an optional `onProgress` callback carrying
+  `pending | running | settled`, and those phases are deliberately NOT added to the frozen
+  `ACTION_STATUSES`. Third, `summarisePlan()` reports the plan-level answer as
+  `ACTIVE | PARTIAL | ERROR` — the existing `SessionState` values — rather than a vocabulary of
+  its own. A capability's `requiredPermissions()` is the authority for the permission gate;
+  `PlannedAction.requiredPermission` is a policy-time hint, cross-checked and surfaced as
+  `declaredPermissionMismatch` on the progress channel.
+- **Reason:** A required registry is what makes `mockRegistry` and the Kotlin-backed registry
+  genuinely interchangeable (ADR-007) — the seam is a parameter, so nothing can quietly bypass it.
+  On progress: `applied`/`failed` describe what happened to the phone and are persisted and shown
+  to the user; `pending`/`running` describe where the walk is. Merging them would let a row be
+  stored as "running" forever if the app died mid-plan. On the plan-level state:
+  `src/memory/session.ts` already says a session starts READY and "the executor moves it to ACTIVE
+  once actions are applied", and `endSession()` already takes PARTIAL — so inventing
+  `all_applied | partial | none_applied` would have been a third vocabulary for a question the
+  codebase had already answered. On permissions, only the capability can see whether the user has
+  actually granted anything, but silently preferring one source hides real drift between policy
+  and device, so the disagreement is reported without changing the verdict.
+- **Alternatives considered:** Default `registry` to the `device` singleton — convenient, but
+  importing `src/native` pulls the Expo module resolver into every Node test. Extend
+  `ACTION_STATUSES` with `pending`/`running` — a frozen-contract change (ADR-006) to express
+  something no `ActionResult` should ever hold. Have the executor call `markSessionActive()`
+  itself — that is a database write, which this layer must not perform.
+- **Impact:** `executePlan` runs actions strictly in `plan.actions` order, one at a time, and
+  returns exactly one `ActionResult` per `PlannedAction`; a failure never aborts the plan.
+  `summarisePlan()` returns a state the caller can hand straight to the session layer. Ordering is
+  Dhrey's guarantee per docs/CONTRACTS.md §2, so the executor never reorders — for the Study plan
+  the three actions are independent and order is irrelevant, but no flag distinguishes that case
+  from one where it matters.
