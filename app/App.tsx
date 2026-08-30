@@ -23,14 +23,27 @@ import {
 } from './src/native';
 import { PriorityScreen } from './src/screens';
 import {
-  executePlan,
-  restoreSession,
-  summarisePlan,
-  summariseRestore,
+  startContext,
+  endContext as endContextLifecycle,
   createRepositorySnapshotStore,
+  type LifecycleHooks,
 } from './src/actions';
 import { activateFromText } from './src/services/contextOrchestrator';
 import { ensureSeeded, getActiveContext, markSessionActive, endSession } from './src/memory';
+
+/**
+ * A-V3: the coordinator's session hooks, wired to Dhrey's PUBLIC session API.
+ *
+ * This is the whole integration seam. `app/src/actions/` never imports `src/memory` — it reports
+ * what happened to the phone and fires these, and the wiring lives here in the caller. When
+ * Dhrey's orchestrator takes over from this harness it connects the same three callbacks and
+ * nothing in the action engine changes.
+ */
+const sessionHooks: LifecycleHooks = {
+  onActivated: (sessionId) => markSessionActive(sessionId).then(() => undefined),
+  onEnded: (sessionId, state) => endSession(sessionId, { status: state }).then(() => undefined),
+  onPartial: (sessionId) => endSession(sessionId, { status: 'PARTIAL' }).then(() => undefined),
+};
 
 /**
  * A-V1: the real Phase 2 sentence. Not a fixture — this string goes through Shlok's parser,
@@ -153,26 +166,22 @@ function DeviceHarness({ onOpenPriority }: { onOpenPriority: () => void }) {
       }
 
       const phases: string[] = [];
-      const results = await executePlan(outcome.plan, {
+
+      // One call. The execute -> summarise -> mark-active sequence lives in the coordinator now,
+      // not here; the harness supplies a device, a store and the hooks (ADR-118).
+      const { state, results, summary } = await startContext(outcome.plan, {
         registry: device,
         // Durable: Dhrey's device_snapshot table, reached through the SnapshotStore port.
         snapshots: createRepositorySnapshotStore(),
+        hooks: sessionHooks,
         onProgress: (e) => {
           if (e.phase !== 'pending') phases.push(`${e.capability}:${e.phase}`);
         },
       });
 
-      const summary = summarisePlan(results);
-
-      // READY -> ACTIVE, and only once something actually changed. The executor reports the
-      // state; moving the row is the caller's job and a database write (ADR-115).
-      if (summary.state === 'ACTIVE' || summary.state === 'PARTIAL') {
-        await markSessionActive(outcome.plan.sessionId);
-      }
-
       setLog(results.slice().reverse());
       setProbe({
-        verdict: `${summary.state} — ${summary.byStatus.applied}/${summary.total} applied`,
+        verdict: `${state} — ${summary.byStatus.applied}/${summary.total} applied`,
         sentence: STUDY_COMMAND,
         session: outcome.plan.sessionId,
         ...Object.fromEntries(
@@ -193,7 +202,7 @@ function DeviceHarness({ onOpenPriority }: { onOpenPriority: () => void }) {
    * after the app has been force-stopped and reopened there is no React state left, and the
    * restore still has to work.
    */
-  const endContext = useCallback(async () => {
+  const onEndContext = useCallback(async () => {
     setProbe({ verdict: 'ending context…' });
 
     try {
@@ -207,25 +216,26 @@ function DeviceHarness({ onOpenPriority }: { onOpenPriority: () => void }) {
       const snapshots = createRepositorySnapshotStore();
       const before = await snapshots.forSession(active.session.id);
 
-      const results = await restoreSession(active.session.id, { registry: device, snapshots });
-      const summary = summariseRestore(results);
-
-      // Clean sweep only. A partial restore keeps its rows so the user can retry (ADR-117).
-      if (summary.safeToClear) await snapshots.clear(active.session.id);
-      await endSession(active.session.id, { status: summary.state });
+      // One call. Restore, summarise, clear-only-if-clean and the session hook are all the
+      // coordinator's job — the harness no longer decides when it is safe to drop rows.
+      const { state, results, summary, cleared, retryable } = await endContextLifecycle(
+        active.session.id,
+        { registry: device, snapshots, hooks: sessionHooks },
+      );
 
       setLog(results.slice().reverse());
       setProbe({
-        verdict: `restore ${summary.state} — ${summary.byStatus.restored}/${summary.total} restored`,
+        verdict: `restore ${state} — ${summary.byStatus.restored}/${summary.total} restored`,
         session: active.session.id,
         snapshots: before.map((r) => `${r.capability}=${String(r.previousValue)}`).join('  '),
+        retryable: String(retryable),
         ...Object.fromEntries(
           results.map((r, i) => [
             `${i + 1}. ${r.capability}`,
             `${r.status} — ${String(r.beforeValue)} → ${String(r.afterValue)}`,
           ]),
         ),
-        cleared: String(summary.safeToClear),
+        cleared: String(cleared),
       });
       await refresh();
     } catch (e) {
@@ -283,13 +293,13 @@ function DeviceHarness({ onOpenPriority }: { onOpenPriority: () => void }) {
       <View style={styles.divider} />
       <Text style={styles.section}>Study vertical slice (A-V1)</Text>
       <Text style={styles.info}>
-        &quot;{STUDY_COMMAND}&quot; → Intent → Policy → ActionPlan → executePlan() → capability →
+        &quot;{STUDY_COMMAND}&quot; → Intent → Policy → ActionPlan → startContext() → capability →
         phone. Expect ringer to come back not_supported until T5, so the plan is PARTIAL.
       </Text>
       <Pressable style={[styles.btn, styles.btnProbe]} onPress={() => void runStudyPlan()}>
         <Text style={styles.btnText}>Run the Study sentence</Text>
       </Pressable>
-      <Pressable style={[styles.btn, styles.btnProbe]} onPress={() => void endContext()}>
+      <Pressable style={[styles.btn, styles.btnProbe]} onPress={() => void onEndContext()}>
         <Text style={styles.btnText}>End context (restore)</Text>
       </Pressable>
       <Text style={styles.info}>
