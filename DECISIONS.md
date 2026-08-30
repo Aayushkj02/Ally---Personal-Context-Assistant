@@ -509,6 +509,40 @@ Because entries never move and IDs never collide, a merge conflict here is alway
   unsupported paths carry the same breakdown, so a caller never has to guess which channels were
   affected by a failure.
 
+### ADR-301 — Priority preferences are stored per contact, applied per scope
+- **Date:** 2026-08-30 · **Author:** Dhrey · **Phase:** 1 · **Status:** Accepted
+- **Decision:** `priority_preference` stores one row per (mode, channel, subject). The policy
+  resolver reduces those rows to a per-channel boolean for the device layer and separately
+  returns the named subjects and a `requiresStarring` list for the UI.
+- **Reason:** The user thinks per person — "let Mom call me during Sleep". Android thinks per
+  scope — starred contacts, all contacts, or anyone — and offers no per-individual-contact DND
+  exception to apps (ADR-111). Storing only a boolean would throw away the user's actual intent
+  and make the Memory screen's provenance impossible. Storing per contact and reducing at the
+  boundary keeps the intent intact and puts the lossy step in exactly one place, where it can be
+  explained on screen.
+- **Alternatives considered:** Store a per-channel boolean — loses who the user named, so we
+  could never tell them which contacts to star. Store per contact and pretend Android honours
+  it — the false-success this project keeps designing against.
+- **Impact:** The screen renders a per-contact list and, for enforceable channels, tells the
+  user which of those people must be **starred in Contacts** or they will still be silenced.
+  That sentence is the difference between a demo that works and one that mysteriously does not.
+
+### ADR-302 — The screen keeps no copy of the data
+- **Date:** 2026-08-30 · **Author:** Dhrey · **Phase:** 1 · **Status:** Accepted
+- **Decision:** `PriorityScreen` reads and writes exclusively through `priorityRepository` and
+  re-reads after every mutation. The Zustand store holds only UI state — the selected mode and
+  the last enforcement result. `enforceable` is set by the repository from
+  `CHANNEL_ENFORCEABLE`, never passed in by a caller.
+- **Reason:** Two sources of truth is how a preference screen ends up showing a tick for
+  something that was never saved. Having the repository own `enforceable` means no screen can
+  accidentally mark WhatsApp as enforced by passing the wrong flag — the honest answer is
+  structural rather than a matter of remembering.
+- **Alternatives considered:** Mirror preferences in the store for snappier rendering — a
+  second storage model, explicitly forbidden, and the lists are small enough that re-reading is
+  imperceptible.
+- **Impact:** The screen takes `onApply` as a prop rather than importing the native layer, so
+  it never crosses into Aayush's boundary and is testable without a device. `UNIQUE(profile_id,
+  channel, subject)` with an upsert makes re-adding someone idempotent instead of duplicating.
 ### ADR-114 — The action engine records snapshots through a port, not a repository call
 - **Date:** 2026-08-31 · **Author:** Aayush · **Phase:** 2 · **Status:** Accepted
 - **Decision:** `executePlan()` writes pre-change values through a `SnapshotStore` interface in

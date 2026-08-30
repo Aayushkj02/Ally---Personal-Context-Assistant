@@ -12,7 +12,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
-import type { ActionResult, CapabilityValue, DndMode } from './src/types';
+import type { ActionResult, CapabilityValue, Channel, DndMode } from './src/types';
 import { STATUS_PRESENTATION } from './src/types';
 import {
   device,
@@ -21,6 +21,7 @@ import {
   applyPriorityPreferences,
   analyseCallLog,
 } from './src/native';
+import { PriorityScreen } from './src/screens';
 import {
   executePlan,
   restoreSession,
@@ -65,6 +66,32 @@ function channelRows(r: {
 }
 
 export default function App() {
+  const [showPriority, setShowPriority] = useState(false);
+
+  if (showPriority) {
+    return (
+      <View style={{ flex: 1 }}>
+        <PriorityScreen
+          onApply={(channels: Record<Channel, boolean>) => {
+            const r = applyPriorityPreferences({
+              calls: channels.calls,
+              sms: channels.sms,
+              whatsapp: channels.whatsapp,
+            });
+            return r?.channels ?? null;
+          }}
+        />
+        <Pressable style={styles.backBtn} onPress={() => setShowPriority(false)}>
+          <Text style={styles.btnText}>Back to device harness</Text>
+        </Pressable>
+      </View>
+    );
+  }
+
+  return <DeviceHarness onOpenPriority={() => setShowPriority(true)} />;
+}
+
+function DeviceHarness({ onOpenPriority }: { onOpenPriority: () => void }) {
   const info = getNativeDeviceInfo();
   const dnd = device.get('dnd');
 
@@ -249,6 +276,10 @@ export default function App() {
         <Text style={styles.btnText}>Run device probe</Text>
       </Pressable>
 
+      <Pressable style={[styles.btn, styles.btnProbe]} onPress={onOpenPriority}>
+        <Text style={styles.btnText}>Open Priority screen</Text>
+      </Pressable>
+
       <View style={styles.divider} />
       <Text style={styles.section}>Study vertical slice (A-V1)</Text>
       <Text style={styles.info}>
@@ -372,6 +403,7 @@ const styles = StyleSheet.create({
   probeBox: { marginTop: 12, padding: 12, borderRadius: 8, backgroundColor: '#161C26', gap: 3 },
   probeVerdict: { color: '#F5F7FA', fontSize: 14, fontWeight: '700', marginBottom: 6 },
   probeRow: { color: '#9AA4B2', fontSize: 12 },
+  backBtn: { backgroundColor: '#232A35', padding: 14, alignItems: 'center' },
   btnText: { color: '#F5F7FA', fontSize: 13, fontWeight: '600' },
   result: { marginTop: 10, gap: 3 },
   pill: { alignSelf: 'flex-start', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 999 },
