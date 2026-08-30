@@ -1,6 +1,7 @@
 import {
   ACTIVITIES,
   CAPABILITY_DOMAIN,
+  CHANNELS,
   CONFIDENCE_THRESHOLD,
   EMPTY_INTENT,
   isCapability,
@@ -109,7 +110,7 @@ export class IntentValidator {
           exc.value.trim().length > 0 &&
           (exc.effect === 'allow' || exc.effect === 'block')
         ) {
-          validatedExceptions.push({
+          const validatedExc: IntentException = {
             type: exc.type,
             value: exc.value.trim(),
             effect: exc.effect,
@@ -117,7 +118,12 @@ export class IntentValidator {
               typeof exc.durationMinutes === 'number' && exc.durationMinutes > 0
                 ? exc.durationMinutes
                 : null,
-          });
+          };
+          // Preserve channel if it's a known value; drop silently if unrecognised
+          if (exc.channel !== undefined && (CHANNELS as readonly string[]).includes(exc.channel)) {
+            validatedExc.channel = exc.channel;
+          }
+          validatedExceptions.push(validatedExc);
         }
       }
     }

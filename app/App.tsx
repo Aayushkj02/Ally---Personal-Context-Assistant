@@ -22,6 +22,16 @@ import {
   analyseCallLog,
 } from './src/native';
 import { PriorityScreen } from './src/screens';
+import { executePlan, summarisePlan, createRepositorySnapshotStore } from './src/actions';
+import { activateFromText } from './src/services/contextOrchestrator';
+import { ensureSeeded } from './src/memory';
+
+/**
+ * A-V1: the real Phase 2 sentence. Not a fixture — this string goes through Shlok's parser,
+ * Dhrey's policy engine and buildActionPlan(), and whatever ActionPlan comes out is what the
+ * executor receives. Nothing here constructs a plan by hand.
+ */
+const STUDY_COMMAND = "I'm going to study for two hours.";
 
 const DND_TESTS: { label: string; value: DndMode }[] = [
   { label: 'Priority', value: 'priority' },
@@ -113,6 +123,56 @@ function DeviceHarness({ onOpenPriority }: { onOpenPriority: () => void }) {
     [dnd, refresh],
   );
 
+  /**
+   * A-V1: sentence -> Intent -> Policy -> ActionPlan -> ActionExecutor -> capability -> phone.
+   *
+   * The harness does exactly two things: ask Dhrey's orchestrator for a plan, and hand that
+   * plan to the executor along with a device registry and a snapshot store. It never touches
+   * an Android API itself and never builds a PlannedAction — that is the whole boundary
+   * being proven here.
+   */
+  const runStudyPlan = useCallback(async () => {
+    setProbe({ verdict: `parsing "${STUDY_COMMAND}" …` });
+
+    try {
+      await ensureSeeded();
+      const outcome = await activateFromText(STUDY_COMMAND);
+
+      if (outcome.kind !== 'activated') {
+        setProbe({
+          verdict: 'parser asked for clarification — nothing was applied',
+          question: outcome.clarification.question,
+        });
+        return;
+      }
+
+      const phases: string[] = [];
+      const results = await executePlan(outcome.plan, {
+        registry: device,
+        // Durable: Dhrey's device_snapshot table, reached through the SnapshotStore port.
+        snapshots: createRepositorySnapshotStore(),
+        onProgress: (e) => {
+          if (e.phase !== 'pending') phases.push(`${e.capability}:${e.phase}`);
+        },
+      });
+
+      const summary = summarisePlan(results);
+      setLog(results.slice().reverse());
+      setProbe({
+        verdict: `${summary.state} — ${summary.byStatus.applied}/${summary.total} applied`,
+        sentence: STUDY_COMMAND,
+        session: outcome.plan.sessionId,
+        ...Object.fromEntries(
+          results.map((r, i) => [`${i + 1}. ${r.capability}`, `${r.status} — ${r.message}`]),
+        ),
+        order: phases.join('  '),
+      });
+      await refresh();
+    } catch (e) {
+      setProbe({ verdict: 'run failed', error: e instanceof Error ? e.message : String(e) });
+    }
+  }, [refresh]);
+
   return (
     <ScrollView contentContainerStyle={styles.root}>
       <Text style={styles.title}>Ally</Text>
@@ -158,6 +218,16 @@ function DeviceHarness({ onOpenPriority }: { onOpenPriority: () => void }) {
 
       <Pressable style={[styles.btn, styles.btnProbe]} onPress={onOpenPriority}>
         <Text style={styles.btnText}>Open Priority screen</Text>
+      </Pressable>
+
+      <View style={styles.divider} />
+      <Text style={styles.section}>Study vertical slice (A-V1)</Text>
+      <Text style={styles.info}>
+        &quot;{STUDY_COMMAND}&quot; → Intent → Policy → ActionPlan → executePlan() → capability →
+        phone. Expect ringer to come back not_supported until T5, so the plan is PARTIAL.
+      </Text>
+      <Pressable style={[styles.btn, styles.btnProbe]} onPress={() => void runStudyPlan()}>
+        <Text style={styles.btnText}>Run the Study sentence</Text>
       </Pressable>
 
       <View style={styles.divider} />

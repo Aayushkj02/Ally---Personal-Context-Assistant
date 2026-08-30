@@ -199,4 +199,67 @@ export const EVAL_DATASET: TestCase[] = [
   { id: 38, input: 'Play some music.', expectedActivity: 'unknown' },
   { id: 39, input: 'Order a pizza.', expectedActivity: 'unknown' },
   { id: 40, input: 'What is the weather today?', expectedActivity: 'unknown' },
+
+  // Golden 8: Channel intent — calls (S-V7)
+  {
+    id: 41,
+    input: 'Let Mom call me while I study.',
+    expectedActivity: 'study',
+  },
+  {
+    id: 42,
+    input: 'Let my parents call me while I study.',
+    expectedActivity: 'study',
+  },
+  {
+    id: 43,
+    input: 'Allow Dad to call while I study.',
+    expectedActivity: 'study',
+  },
+
+  // Golden 9: Channel intent — SMS (S-V7)
+  {
+    id: 44,
+    input: "Let Mom's SMS through while I study.",
+    expectedActivity: 'study',
+  },
+  {
+    id: 45,
+    input: 'Allow messages from Dad while studying.',
+    expectedActivity: 'study',
+  },
+
+  // Golden 10: Channel intent — WhatsApp preference_only (S-V7)
+  {
+    id: 46,
+    input: 'Let my project WhatsApp group through while I study.',
+    context: { activeActivity: 'study' },
+    expectedActivity: 'study',
+  },
+  {
+    id: 47,
+    input: 'Allow my project WhatsApp group to notify me while studying.',
+    expectedActivity: 'study',
+  },
+
+  // Golden 11: Deactivate / undo (S-V6)
+  {
+    id: 48,
+    input: 'Undo that.',
+    context: { activeActivity: 'study' },
+    expectedActivity: 'study',
+    expectedOperation: 'deactivate',
+  },
+  {
+    id: 49,
+    input: 'End study session.',
+    expectedActivity: 'study',
+    expectedOperation: 'deactivate',
+  },
+  {
+    id: 50,
+    input: 'Stop studying.',
+    expectedActivity: 'study',
+    expectedOperation: 'deactivate',
+  },
 ];

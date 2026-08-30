@@ -1,8 +1,5 @@
-/**
- * OWNER: DHREY
- *
- * PUBLIC SURFACE of the policy layer. Consumes stored preferences and Intents; produces
- * the shapes the device layer accepts. Never calls native code itself.
- */
-
-export * from './resolver';
+export { resolve } from './resolver';
+export { buildActionPlan } from './planner';
+export { getActiveOverrides, resolveCapability } from './rules';
+export { resolvePriority, describeEnforcement } from './resolver/priorityResolver';
+export type { ResolvedPriority } from './resolver/priorityResolver';

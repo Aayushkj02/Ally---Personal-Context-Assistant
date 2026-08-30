@@ -84,7 +84,7 @@ intent engine and the policy engine, `ActionPlan` between the policy engine and 
 
 ## 3. Intent pipeline — *Shlok*
 
-⬜ *Phase 1–2.*
+✅ *Phase 1–2.*
 
 ```
 speech ──► on-device STT ──► raw text
@@ -143,18 +143,22 @@ policy is computed even if the app was killed while an override was live.
 
 ## 5. Action execution — *Aayush*
 
-⬜ *Phase 2–3.*
+✅ *Phase 2 — A-V1 landed. `ActionPlan` → `executePlan()` → capability → Android, driven by a
+real sentence and verified on SM-S928B. Restore (§6) is still ⬜.*
 
-`executePlan()` walks the `ActionPlan` in order. Per action:
+`executePlan(plan, deps)` walks the `ActionPlan` in order. Per action:
 
 ```
-permission granted? ──no──► ActionResult{ permission_needed }   (no mutation attempted)
+in CAPABILITIES? ──no──► ActionResult{ not_supported }   (allow-list, SRS FR-13)
         │yes
         ▼
 capability available? ──no──► ActionResult{ not_supported }
         │yes
         ▼
-needsSnapshot? ──yes──► read current value ──► persist DeviceSnapshot(sessionId, capability)
+permission granted? ──no──► ActionResult{ permission_needed }   (no mutation attempted)
+        │yes
+        ▼
+needsSnapshot? ──yes──► read current value ──► SnapshotStore.save(sessionId, capability)
         │
         ▼
 execute(value)
@@ -166,13 +170,63 @@ read back ──mismatch──► ActionResult{ failed }
 ActionResult{ applied, beforeValue, afterValue }
 ```
 
+**The executor is handed a device, never reaching for one** (ADR-115). `deps.registry` is a
+required `DeviceRegistry`, so `MockDevice` and the Kotlin-backed registry are interchangeable and
+the engine unit-tests in Node. Nothing in `src/actions/` parses language, decides policy, or
+touches SQLite — `snapshotStoreAdapter.ts` is the single file that knows a database exists, and
+the executor does not import it.
+
+**Snapshots go through a port to Dhrey's existing table** (ADR-114). `SnapshotStore` carries the
+frozen `DeviceSnapshot` row; `createRepositorySnapshotStore()` wires it to `snapshotRepository`.
+`save()` is first-write-wins per `(sessionId, capability)` — re-snapshotting mid-session would
+replace the user's original value with one Ally set, and restore would then put back Ally's own
+change.
+
+**Ordering is Dhrey's guarantee** (docs/CONTRACTS.md §2), so the executor honours `plan.actions`
+order exactly, one at a time, and never reorders or parallelises. For the Study plan the three
+actions are independent — DND, brightness and ringer touch unrelated settings — so their order
+does not matter; it is still deterministic, because nothing distinguishes that case from a plan
+whose actions do interact.
+
+**Progress is not an outcome.** `onProgress` reports `pending | running | settled`; those phases
+are deliberately absent from `ACTION_STATUSES`, which only ever holds what happened to the phone.
+
 **The read-back is not optional.** `applied` may only be returned for a write we confirmed by
 reading the value again. Everything else is `failed`, `permission_needed` or `not_supported` — this
 is the "never fake success" requirement (PRD §20, NFR-03) and the single most load-bearing rule in
 the codebase.
 
 One action failing never aborts the plan; the remaining actions still execute and each row reports
-its own status independently.
+its own status independently. `executePlan()` returns exactly one `ActionResult` per
+`PlannedAction`, in the same order.
+
+`summarisePlan()` derives the plan-level answer and reports it in the **existing `SessionState`
+vocabulary** rather than a new one, because that is what the session layer already expects to be
+told (`src/memory/session.ts`: a session starts READY and "the executor moves it to ACTIVE once
+actions are applied"):
+
+| every action applied | some applied | none applied |
+|---|---|---|
+| `ACTIVE` | `PARTIAL` | `ERROR` |
+
+The executor **returns** that state; it never writes it. Moving the session row is
+`markSessionActive()` / `endSession()` in Dhrey's memory layer.
+
+**A-V1 on the real device** (SM-S928B, Android 16, targetSdk 36). Driven by
+`activateFromText("I'm going to study for two hours.")` — a real plan from the real producer, no
+fixture. Read independently via `adb shell settings`:
+
+| | before | after |
+|---|---|---|
+| `global zen_mode` | 0 | 1 (priority) |
+| `system screen_brightness` | 187 | 102 (40%) |
+
+Executor reported `PARTIAL — 2/3 applied`: `dnd: applied [interruption_filter]`,
+`brightness: applied`, `ringer: not_supported`. The ringer row is correct and expected — `ringer`
+is still `pendingCapability` until T5 (ADR-104), so a Study plan cannot be 3/3 until then, and
+`PARTIAL` is the honest answer rather than a rounded success or failure. Snapshots for `dnd`
+("off") and `brightness` (73) landed in `device_snapshot`; `ringer` correctly produced none,
+because an action that never ran has nothing to restore.
 
 ---
 
@@ -251,7 +305,7 @@ phone is fully functional standalone.
 
 ## 9. Error & degradation paths — *Shlok*
 
-⬜ *Phase 1–3.*
+✅ *Phase 1–3.*
 
 The system degrades in layers. Each layer failing costs a capability, never the product.
 

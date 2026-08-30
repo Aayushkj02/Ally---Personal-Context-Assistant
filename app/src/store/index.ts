@@ -1,34 +1,12 @@
 /**
- * OWNER: DHREY. FREEZE once Phase 1 closes.
+ * OWNER: DHREY — task D4. FREEZE AT END OF PHASE 1.
  *
- * Session/app state. Deliberately thin: priority preferences live in SQLite and are read
- * through the repository, never mirrored here. The store holds only which mode the user is
- * looking at and the last enforcement result — UI state, not data.
+ * Zustand app store: session state, parse state, last result, permission status.
+ * Shape is frozen after Phase 1 for the same reason src/types/ is (ADR-006) — it is
+ * imported by every screen, so churn here is a three-way conflict.
+ *
+ * SessionState values are FROZEN in src/types/policy.ts (PRD §15 lifecycle).
  */
 
-import { create } from 'zustand';
-
-import type { ChannelEnforcement } from '../types';
-
-/** The three contexts. Study and Sleep are seeded; Focus is scaffolded (ADR-004). */
-export const MODES = [
-  { id: 'study', label: 'Study' },
-  { id: 'sleep', label: 'Sleep' },
-  { id: 'focus', label: 'Focus' },
-] as const;
-
-export type ModeId = (typeof MODES)[number]['id'];
-
-interface AppState {
-  mode: ModeId;
-  setMode: (mode: ModeId) => void;
-  lastEnforcement: ChannelEnforcement[] | null;
-  setLastEnforcement: (rows: ChannelEnforcement[] | null) => void;
-}
-
-export const useAppStore = create<AppState>((set) => ({
-  mode: 'sleep',
-  setMode: (mode) => set({ mode, lastEnforcement: null }),
-  lastEnforcement: null,
-  setLastEnforcement: (rows) => set({ lastEnforcement: rows }),
-}));
+export { useStore } from './useStore';
+export type { AppState } from './useStore';
