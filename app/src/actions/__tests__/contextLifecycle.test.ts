@@ -15,6 +15,7 @@ import { describe, it, expect, beforeEach } from '@jest/globals';
 import type {
   ActionPlan,
   Capability,
+  ChannelEnforcement,
   DeviceCapability,
   DeviceRegistry,
   PlannedAction,
@@ -280,6 +281,107 @@ describe('hook scoping', () => {
     });
 
     expect(ended).toEqual([SESSION]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// A-V7 — priority is applied with the context, and reported honestly
+// ---------------------------------------------------------------------------
+
+describe('A-V7. priority', () => {
+  /** What Dhrey's applier returns on this device: calls + sms enforced, whatsapp never. */
+  const samsungReport: ChannelEnforcement[] = [
+    { channel: 'calls', status: 'enforced', message: 'Starred contacts can call you.' },
+    { channel: 'sms', status: 'enforced', message: 'Starred contacts can message you.' },
+    {
+      channel: 'whatsapp',
+      status: 'preference_only',
+      message: 'Ally remembers this. Android cannot let Ally control WhatsApp notifications.',
+    },
+  ];
+
+  it('applies priority once the plan has changed something, and returns the per-channel result', async () => {
+    let calls = 0;
+    const result = await startContext(plan([action({ capability: 'dnd', value: 'priority' })]), {
+      registry: mockRegistry,
+      snapshots: createInMemorySnapshotStore(),
+      applyPriority: async () => {
+        calls += 1;
+        return samsungReport;
+      },
+    });
+
+    expect(calls).toBe(1);
+    expect(result.priority).toEqual(samsungReport);
+  });
+
+  it('never reports WhatsApp as enforced — the applier is the only source of that verdict', async () => {
+    const result = await startContext(plan([action({ capability: 'dnd', value: 'priority' })]), {
+      registry: mockRegistry,
+      snapshots: createInMemorySnapshotStore(),
+      applyPriority: async () => samsungReport,
+    });
+
+    const byChannel = new Map(result.priority?.map((c) => [c.channel, c.status]));
+    expect(byChannel.get('calls')).toBe('enforced');
+    expect(byChannel.get('sms')).toBe('enforced');
+    expect(byChannel.get('whatsapp')).toBe('preference_only');
+  });
+
+  it('keeps the priority result separate from the plan status', async () => {
+    // The plan is PARTIAL (ringer unsupported) while calls/sms are enforced. Collapsing the
+    // two would lose one of the facts the user needs.
+    const result = await startContext(studyPlan(), {
+      registry: studyRegistry(),
+      snapshots: createInMemorySnapshotStore(),
+      applyPriority: async () => samsungReport,
+    });
+
+    expect(result.state).toBe('PARTIAL');
+    expect(result.priority?.find((c) => c.channel === 'calls')?.status).toBe('enforced');
+  });
+
+  it('does NOT touch priority when the plan applied nothing', async () => {
+    let calls = 0;
+    __setMockPermission('notification_policy', false);
+
+    const result = await startContext(plan([action({ capability: 'dnd', value: 'priority' })]), {
+      registry: mockRegistry,
+      snapshots: createInMemorySnapshotStore(),
+      applyPriority: async () => {
+        calls += 1;
+        return samsungReport;
+      },
+    });
+
+    expect(result.state).toBe('ERROR');
+    // The device is untouched on a total failure; rewriting the notification policy would
+    // break that promise for a context that never started.
+    expect(calls).toBe(0);
+    expect(result.priority).toBeNull();
+  });
+
+  it('a throwing applier does not take the context down with it', async () => {
+    const result = await startContext(plan([action({ capability: 'dnd', value: 'priority' })]), {
+      registry: mockRegistry,
+      snapshots: createInMemorySnapshotStore(),
+      applyPriority: async () => {
+        throw new Error('binder died');
+      },
+    });
+
+    expect(result.state).toBe('ACTIVE');
+    expect(__getMockState().dnd).toBe('priority');
+    expect(result.priority).toBeNull();
+  });
+
+  it('is null when no applier is wired, which is not a claim either way', async () => {
+    const result = await startContext(plan([action({ capability: 'dnd', value: 'priority' })]), {
+      registry: mockRegistry,
+      snapshots: createInMemorySnapshotStore(),
+    });
+
+    expect(result.priority).toBeNull();
   });
 });
 

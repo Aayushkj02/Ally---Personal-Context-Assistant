@@ -23,7 +23,13 @@
  * caller connect them. A caller that wires nothing still gets correct device behaviour.
  */
 
-import type { ActionPlan, ActionResult, DeviceRegistry, SessionState } from '../types';
+import type {
+  ActionPlan,
+  ActionResult,
+  ChannelEnforcement,
+  DeviceRegistry,
+  SessionState,
+} from '../types';
 import { executePlan, restoreSession, type ActionProgress } from './executors';
 import type { SnapshotStore } from './SnapshotStore';
 import {
@@ -82,6 +88,17 @@ export interface CoordinatorDeps {
   hooks?: LifecycleHooks;
   onProgress?: (event: ActionProgress) => void;
   now?: () => number;
+  /**
+   * Applies this context's priority preferences — who may still reach the user while it runs.
+   *
+   * INJECTED, and deliberately opaque to the coordinator (ADR-119). Resolving which contacts
+   * and channels a context allows is Dhrey's `applyPriorityForContext()`; sending it to Android
+   * is `applyPriorityPreferences()` in src/native; Dhrey's own module already wires those two
+   * together. All the coordinator decides is WHEN it happens — after the plan, and never when
+   * the plan applied nothing. Passing a thunk rather than a request object is what keeps a
+   * second priority policy from growing here.
+   */
+  applyPriority?: () => Promise<ChannelEnforcement[] | null>;
 }
 
 export interface StartContextResult {
@@ -89,6 +106,15 @@ export interface StartContextResult {
   state: ContextState;
   results: ActionResult[];
   summary: PlanSummary;
+  /**
+   * Per-channel outcome in the four-state vocabulary — `enforced`, `preference_only`,
+   * `unsupported`, `failed`. Never collapsed into the plan's own status, because "your
+   * WhatsApp preference is remembered but Android will not act on it" is a different fact
+   * from "the context is active" and the user needs both (ADR-113).
+   *
+   * null means no applier was wired, not that priority succeeded or failed.
+   */
+  priority: ChannelEnforcement[] | null;
 }
 
 export interface EndContextResult {
@@ -140,6 +166,22 @@ export async function startContext(
   const summary = summarisePlan(results);
   const state: ContextState = summary.state;
 
+  // Priority runs AFTER the plan and only when the plan actually changed something. Letting
+  // people through a context that never started would rewrite the user's notification policy
+  // for nothing — and on a total failure the device is untouched, which is the promise.
+  let priority: ChannelEnforcement[] | null = null;
+  if (state !== 'ERROR' && deps.applyPriority) {
+    try {
+      priority = await deps.applyPriority();
+    } catch {
+      // Contained for the same reason a hook is: the plan already moved the phone, and a
+      // priority call that blew up must not turn that into a thrown startContext. Dhrey's
+      // applier converts device failures into `failed` rows rather than throwing, so reaching
+      // here means the seam itself broke, and null says "no answer" rather than inventing one.
+      priority = null;
+    }
+  }
+
   if (state === 'ERROR') {
     await fire(hooks?.onFailed, () => hooks?.onFailed?.(sessionId, results));
   } else {
@@ -149,7 +191,7 @@ export async function startContext(
     await fire(hooks?.onActivated, () => hooks?.onActivated?.(sessionId, state));
   }
 
-  return { sessionId, state, results, summary };
+  return { sessionId, state, results, summary, priority };
 }
 
 export interface EndContextOptions {

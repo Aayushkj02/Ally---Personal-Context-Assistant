@@ -29,6 +29,7 @@ import {
   type LifecycleHooks,
 } from './src/actions';
 import { activateFromText } from './src/services/contextOrchestrator';
+import { applyPriorityForActivity } from './src/services/priorityIntegration';
 import { ensureSeeded, getActiveContext, markSessionActive, endSession } from './src/memory';
 
 /**
@@ -169,11 +170,17 @@ function DeviceHarness({ onOpenPriority }: { onOpenPriority: () => void }) {
 
       // One call. The execute -> summarise -> mark-active sequence lives in the coordinator now,
       // not here; the harness supplies a device, a store and the hooks (ADR-118).
-      const { state, results, summary } = await startContext(outcome.plan, {
+      const { state, results, summary, priority } = await startContext(outcome.plan, {
         registry: device,
         // Durable: Dhrey's device_snapshot table, reached through the SnapshotStore port.
         snapshots: createRepositorySnapshotStore(),
         hooks: sessionHooks,
+        // A-V7: who may still reach the user while Study runs. Resolution and the device call
+        // are both Dhrey's applyPriorityForActivity(); the coordinator only decides when.
+        applyPriority: async () => {
+          const o = await applyPriorityForActivity(outcome.intent.activity);
+          return o?.enforcement ?? null;
+        },
         onProgress: (e) => {
           if (e.phase !== 'pending') phases.push(`${e.capability}:${e.phase}`);
         },
@@ -188,6 +195,9 @@ function DeviceHarness({ onOpenPriority }: { onOpenPriority: () => void }) {
           results.map((r, i) => [`${i + 1}. ${r.capability}`, `${r.status} — ${r.message}`]),
         ),
         order: phases.join('  '),
+        ...Object.fromEntries(
+          (priority ?? []).map((c) => [`priority ${c.channel}`, `${c.status} — ${c.message}`]),
+        ),
       });
       await refresh();
     } catch (e) {

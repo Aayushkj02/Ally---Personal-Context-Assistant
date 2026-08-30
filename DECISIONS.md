@@ -690,3 +690,29 @@ Because entries never move and IDs never collide, a merge conflict here is alway
   summarisers moved from `index.ts` into `summaries.ts` so the coordinator can use them without
   importing the barrel that exports it — a cycle that worked today and would have broken the first
   time someone moved a call to module-initialisation time.
+
+### ADR-119 — Priority is applied by the lifecycle, as an injected thunk, and reported separately
+- **Date:** 2026-08-31 · **Author:** Aayush · **Phase:** 2 · **Status:** Accepted
+- **Decision:** `startContext()` accepts an optional `applyPriority: () => Promise<ChannelEnforcement[] | null>`
+  and calls it after the plan, only when the plan applied something. The result is returned as
+  `StartContextResult.priority` and is never merged into the plan's `PlanSummary`.
+- **Reason:** Priority is not a `PlannedAction` — it is not a capability with a value, it has no
+  snapshot, and Android expresses it as a notification policy rather than a setting. Adding it to
+  `ActionPlan` would mean changing a frozen contract to carry something the executor's ladder
+  cannot meaningfully run. But it IS part of what a context does, so something has to sequence it,
+  and the coordinator is the only layer that already owns "when a context starts". Passing a thunk
+  rather than a request object is what stops a second priority policy growing here: resolution
+  stays Dhrey's `applyPriorityForContext()`, the device call stays `applyPriorityPreferences()`,
+  and the coordinator cannot see either. Skipping it on `ERROR` preserves the promise that a
+  totally failed plan leaves the device untouched.
+- **Alternatives considered:** Extend `ActionPlan` with a priority field — a frozen-contract change
+  (ADR-006) for something with no snapshot and no read-back. Add a `priority` capability to
+  `CAPABILITIES` — it has no single `CapabilityValue`, and its result is per-channel, not one
+  status. Let the caller apply priority itself before/after `startContext()` — that is what the
+  harness did, and it meant priority was never part of starting a context at all.
+- **Impact:** Verified on SM-S928B with "Mom" on Calls only. The consolidated policy went from
+  `ALARMS,MEDIA` to `ALARMS,CALLS,REPEAT_CALLERS` — `CALLS` in because Mom is a calls contact,
+  `MESSAGES` correctly absent because no SMS contact was listed, `REPEAT_CALLERS` on because the
+  emergency bypass is unconditional. Ending the context put the policy back to `ALARMS,MEDIA`.
+  The coordinator reported `calls: enforced`, `sms: unsupported`, `whatsapp: preference_only`
+  alongside a `PARTIAL` plan — four vocabularies coexisting rather than collapsing.
