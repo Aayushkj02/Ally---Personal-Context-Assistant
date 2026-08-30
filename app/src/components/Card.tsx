@@ -11,14 +11,7 @@ export interface CardProps {
 
 export const Card = ({ elevated = false, style, children, ...props }: CardProps) => {
   return (
-    <View 
-      style={[
-        styles.card,
-        elevated && styles.elevated,
-        style
-      ]} 
-      {...props}
-    >
+    <View style={[styles.card, elevated && styles.elevated, style]} {...props}>
       {children}
     </View>
   );
@@ -39,5 +32,5 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.05,
     shadowRadius: 8,
     elevation: 2,
-  }
+  },
 });

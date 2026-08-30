@@ -7,6 +7,7 @@
 
 import * as SQLite from 'expo-sqlite';
 import { up as initialSchema } from './001_initial_schema';
+import { up as priorityPreference } from './002_priority_preference';
 
 export async function runMigrations(db: SQLite.SQLiteDatabase): Promise<void> {
   await db.execAsync(`
@@ -24,6 +25,7 @@ export async function runMigrations(db: SQLite.SQLiteDatabase): Promise<void> {
 
   const migrations = [
     { name: '001_initial_schema', up: initialSchema },
+    { name: '002_priority_preference', up: priorityPreference },
   ];
 
   for (const migration of migrations) {

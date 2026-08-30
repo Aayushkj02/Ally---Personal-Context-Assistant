@@ -11,22 +11,22 @@ export interface TextProps {
   [key: string]: any;
 }
 
-export const Text = ({ 
-  preset = 'body', 
-  color = 'textPrimary', 
-  align = 'left', 
-  style, 
+export const Text = ({
+  preset = 'body',
+  color = 'textPrimary',
+  align = 'left',
+  style,
   children,
-  ...props 
+  ...props
 }: TextProps) => {
   return (
-    <RNText 
+    <RNText
       style={[
         typography.presets[preset as keyof typeof typography.presets],
         { color: colors[color as keyof typeof colors] as string, textAlign: align },
-        style
-      ]} 
-      {...props} 
+        style,
+      ]}
+      {...props}
     >
       {children}
     </RNText>

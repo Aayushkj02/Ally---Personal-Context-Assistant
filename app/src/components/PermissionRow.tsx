@@ -21,13 +21,16 @@ export const PermissionRow = ({ permission, onRequest }: PermissionRowProps) => 
       </View>
       <View style={styles.actionContainer}>
         {permission.granted ? (
-          <Text preset="micro" color="success">Granted</Text>
+          <Text preset="micro" color="success" accessibilityLabel={`${permission.label}: granted`}>
+            Granted
+          </Text>
         ) : (
-          <Button 
-            label="Grant" 
-            variant="secondary" 
-            onPress={() => onRequest(permission.key)} 
-            style={styles.button} 
+          <Button
+            label="Grant"
+            variant="secondary"
+            accessibilityLabel={`Grant ${permission.label}`}
+            onPress={() => onRequest(permission.key)}
+            style={styles.button}
           />
         )}
       </View>
@@ -61,5 +64,5 @@ const styles = StyleSheet.create({
     minHeight: 36,
     paddingVertical: spacing.xs,
     paddingHorizontal: spacing.md,
-  }
+  },
 });

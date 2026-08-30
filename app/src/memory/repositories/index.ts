@@ -9,6 +9,7 @@
  *   overrideRepository    temporary_override   (expiry filtered at read time)
  *   snapshotRepository    device_snapshot      ← restoration source of truth
  *   commandRepository     command_log + action_execution
+ *   priorityRepository    priority_preference  (standing per-channel priority list)
  *
  * TWO COLUMNS CARRY PRODUCT WEIGHT — do not drop them as a write optimisation:
  *   preference.source_command   the verbatim sentence behind a remembered preference
@@ -21,3 +22,4 @@ export * from './overrideRepository';
 export * from './snapshotRepository';
 export * from './commandRepository';
 export * from './permissionRepository';
+export * from './priorityRepository';

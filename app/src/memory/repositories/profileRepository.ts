@@ -36,6 +36,22 @@ export const profileRepository = {
     return row || null;
   },
 
+  /**
+   * Look a profile up by its mode key ("study" | "sleep").
+   *
+   * This is the bridge from a validated Intent to stored memory: Intent.activity
+   * carries the mode key, ContextProfile.modeKey stores it. Without this the
+   * orchestrator would have to scan listProfiles() in application code.
+   */
+  async getProfileByModeKey(modeKey: string): Promise<ContextProfile | null> {
+    const db = await getDatabase();
+    const row = await db.getFirstAsync<ContextProfile>(
+      'SELECT id, name, modeKey, createdAt, updatedAt FROM context_profile WHERE modeKey = ?',
+      [modeKey]
+    );
+    return row || null;
+  },
+
   async listProfiles(): Promise<ContextProfile[]> {
     const db = await getDatabase();
     return await db.getAllAsync<ContextProfile>('SELECT id, name, modeKey, createdAt, updatedAt FROM context_profile');

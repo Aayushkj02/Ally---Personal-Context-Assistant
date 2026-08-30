@@ -15,13 +15,13 @@ export const Timer = ({ endsAt, onExpire }: TimerProps) => {
     const interval = setInterval(() => {
       const remaining = Math.max(0, endsAt - Date.now());
       setTimeLeft(remaining);
-      
+
       if (remaining <= 0) {
         clearInterval(interval);
         if (onExpire) onExpire();
       }
     }, 1000);
-    
+
     return () => clearInterval(interval);
   }, [endsAt, onExpire]);
 
@@ -29,7 +29,12 @@ export const Timer = ({ endsAt, onExpire }: TimerProps) => {
   const seconds = Math.floor((timeLeft % 60000) / 1000);
 
   return (
-    <View style={styles.container}>
+    <View
+      style={styles.container}
+      accessible
+      accessibilityRole="timer"
+      accessibilityLabel={`${minutes} minutes ${seconds} seconds remaining`}
+    >
       <Text preset="bodyMedium" color="primary">
         {`${minutes}:${seconds.toString().padStart(2, '0')}`}
       </Text>
@@ -44,5 +49,5 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.xs,
     borderRadius: radius.pill,
     alignSelf: 'flex-start',
-  }
+  },
 });

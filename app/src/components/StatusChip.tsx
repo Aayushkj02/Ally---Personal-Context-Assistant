@@ -11,12 +11,17 @@ export interface StatusChipProps {
 
 export const StatusChip = ({ status }: StatusChipProps) => {
   const presentation = STATUS_PRESENTATION[status];
-  
+
   // Convert tone to theme color safely
   const toneColor = colors[presentation.tone as keyof typeof colors] || colors.neutral;
 
   return (
-    <View style={[styles.chip, { backgroundColor: toneColor + '20' }]}>
+    <View
+      style={[styles.chip, { backgroundColor: toneColor + '20' }]}
+      accessible
+      accessibilityRole="text"
+      accessibilityLabel={`Status: ${presentation.label}`}
+    >
       <Text preset="micro" style={{ color: toneColor }}>
         {presentation.label}
       </Text>
@@ -32,5 +37,5 @@ const styles = StyleSheet.create({
     borderRadius: radius.pill,
     flexDirection: 'row',
     alignItems: 'center',
-  }
+  },
 });
