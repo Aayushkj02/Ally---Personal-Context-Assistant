@@ -623,3 +623,36 @@ Because entries never move and IDs never collide, a merge conflict here is alway
   A permission revoked mid-context yields `PARTIAL` with every row retained, and re-granting it and
   running restore again finishes the job exactly. The caller remains responsible for
   `markSessionActive()` and `endSession()`, unchanged from ADR-115.
+
+### ADR-118 — Context lifecycle is a coordinator over the executor, and the session boundary is a hook
+- **Date:** 2026-08-31 · **Author:** Aayush · **Phase:** 2 · **Status:** Accepted
+- **Decision:** `ContextCoordinator.ts` exposes `startContext(plan, deps)`,
+  `endContext(sessionId, deps)` and `restoreContext(sessionId, deps)`, composing the existing
+  `executePlan()` and `restoreSession()` without re-implementing either. It reports progress
+  through optional `LifecycleHooks` — `onStarted`, `onActivated`, `onFailed`, `onPartial`,
+  `onEnded` — rather than calling Dhrey's session functions itself, so `app/src/actions/` still
+  never imports `src/memory`. Its states are the existing `SessionState` values
+  (`READY`/`ACTIVE`/`PARTIAL`/`ERROR`/`IDLE`); no new enum. `endContext()` clears snapshots only
+  when `summariseRestore().safeToClear`, through the `SnapshotStore` port.
+- **Reason:** The execute → summarise → mark-active and restore → summarise → decide-about-rows
+  sequences were written by hand in the harness and would have been written again by every caller.
+  Each has a rule that is easy to get quietly wrong — never claim ACTIVE when nothing applied,
+  never drop snapshots after a half-restore — and those rules belong in one tested place rather
+  than in each caller's head. Hooks rather than calls because moving a session row is a database
+  write this layer must not make (ADR-114/115), and because a bookkeeping failure upstream must
+  not be able to make a device change that already happened look like it did not: a throwing hook
+  is caught and the device result stands.
+- **Alternatives considered:** Have the coordinator call `markSessionActive()` / `endSession()`
+  directly — crosses the ownership boundary and drags SQLite into every coordinator test. Add a
+  `FAILED` or `RESTORED` session state — `ERROR` and `IDLE` already mean exactly those, and
+  `endSession()` already takes them. Let the caller keep orchestrating — that is what produced the
+  bug below.
+- **Impact:** `onPartial` is scoped to the RESTORE path only. It originally fired for a partly
+  applied plan as well, and the device smoke test caught what that costs: the harness wires
+  `onPartial` to `endSession()`, so a PARTIAL apply ended the session it had just started, and the
+  next `endContext()` found nothing to end. A hook whose meaning depends on which call fired it
+  will be miswired — mine was, within an hour. A partial apply is already fully described by
+  `onActivated(sessionId, 'PARTIAL')`, and a regression test now holds that line. Separately, the
+  summarisers moved from `index.ts` into `summaries.ts` so the coordinator can use them without
+  importing the barrel that exports it — a cycle that worked today and would have broken the first
+  time someone moved a call to module-initialisation time.

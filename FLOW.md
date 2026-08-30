@@ -264,6 +264,32 @@ chance.
 **One failure never aborts the walk.** A phone that refuses to put brightness back must still get
 its Do Not Disturb turned off.
 
+**The two sequences are one call each** (ADR-118). `startContext(plan, deps)` and
+`endContext(sessionId, deps)` in `ContextCoordinator.ts` compose `executePlan()` and
+`restoreSession()` — they re-implement neither, and own no policy, session table or persistence.
+Each carries a rule that is easy to get quietly wrong and now has tests on it: never report
+ACTIVE when nothing applied, and never drop the snapshots after a restore that only half-worked.
+
+```
+READY ──startContext(plan)──► ACTIVE | PARTIAL | ERROR
+                                   └──endContext(sessionId)──► IDLE | PARTIAL
+```
+
+Every value is an existing `SessionState`. `endContext()` needs nothing but a `sessionId`, which
+is what lets it run on a process that never saw the plan.
+
+**The session boundary is a hook, not a call.** Moving a session row is Dhrey's
+`markSessionActive()` / `endSession()`, and those are database writes this layer must not make.
+The coordinator fires `onStarted` / `onActivated` / `onFailed` / `onPartial` / `onEnded` and the
+caller connects them; `app/src/actions/` never imports `src/memory`. A caller that wires nothing
+still gets correct device behaviour, and a hook that throws is contained — a session row that
+failed to update must never make a device change that already happened look like it did not.
+
+`onPartial` fires on the RESTORE path only. It originally fired for a partly-applied plan too,
+and that cost an afternoon on the device: the harness wires it to `endSession()`, so a PARTIAL
+apply immediately ended the session it had just started and the next `endContext()` reported "no
+active context to end". A partial apply is already fully described by `onActivated(id, 'PARTIAL')`.
+
 **Snapshots are retained unless the restore was clean.** `restoreSession()` never deletes
 anything — that is a database write this layer must not perform, and the rows *are* the retry.
 The caller reads `summariseRestore().safeToClear` and calls `SnapshotStore.clear()` only on a
