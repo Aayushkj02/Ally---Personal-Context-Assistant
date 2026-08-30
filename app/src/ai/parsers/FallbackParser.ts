@@ -375,12 +375,8 @@ export class FallbackParser implements IntentParser {
     ) {
       operation = 'teach';
     } else if (
-      normalized.includes('going to') ||
-      normalized.includes('start') ||
-      normalized.includes('activate')
-    ) {
-      operation = 'activate';
-    } else if (
+      // NOTE: deactivate is checked BEFORE activate to prevent the substring
+      // collision where 'deactivate' also matches 'activate' (bug: Case 23).
       normalized.includes('done') ||
       normalized.includes('stop') ||
       normalized.includes('deactivate') ||
@@ -390,6 +386,12 @@ export class FallbackParser implements IntentParser {
       normalized.includes('end sleep')
     ) {
       operation = 'deactivate';
+    } else if (
+      normalized.includes('going to') ||
+      normalized.includes('start') ||
+      normalized.includes('activate')
+    ) {
+      operation = 'activate';
     } else if (
       normalized.includes('change') ||
       normalized.includes('modify') ||
