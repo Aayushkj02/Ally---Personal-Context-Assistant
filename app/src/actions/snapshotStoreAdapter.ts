@@ -32,7 +32,12 @@ export function createRepositorySnapshotStore(): SnapshotStore {
     },
 
     async forSession(sessionId: string) {
+      // Dhrey's repository orders by capturedAt ASC — capture order. restoreSession() reverses it.
       return snapshotRepository.getBySession(sessionId);
+    },
+
+    async clear(sessionId: string) {
+      await snapshotRepository.cleanupSessionSnapshots(sessionId);
     },
   };
 }

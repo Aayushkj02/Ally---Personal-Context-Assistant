@@ -27,6 +27,12 @@ export interface SnapshotStore {
   save(snapshot: DeviceSnapshot): Promise<void>;
   /** Everything captured for a session, in capture order. Restore walks this in reverse. */
   forSession(sessionId: string): Promise<DeviceSnapshot[]>;
+  /**
+   * Discards a session's snapshots. ONLY safe after a fully clean restore — a partial or failed
+   * restore must keep them so the user can retry (FLOW.md §6). The executor never calls this
+   * itself; it reports the outcome and the caller decides (ADR-117).
+   */
+  clear(sessionId: string): Promise<void>;
 }
 
 /** Stable id, which is what makes first-write-wins expressible as a plain key collision. */
@@ -67,6 +73,10 @@ export function createInMemorySnapshotStore(): SnapshotStore {
 
     async forSession(sessionId) {
       return [...rows.values()].filter((r) => r.sessionId === sessionId);
+    },
+
+    async clear(sessionId) {
+      for (const [key, row] of rows) if (row.sessionId === sessionId) rows.delete(key);
     },
   };
 }

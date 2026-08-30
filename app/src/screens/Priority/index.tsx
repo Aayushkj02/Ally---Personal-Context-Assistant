@@ -17,10 +17,25 @@ import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-
 
 import type { Channel, ChannelEnforcement, PriorityPreference } from '../../types';
 import { CHANNEL_ENFORCEABLE, ENFORCEMENT_PRESENTATION } from '../../types';
-import { priorityRepository } from '../../memory';
+import { priorityRepository, resolveProfileForActivity } from '../../memory';
 import { describeEnforcement, resolvePriority } from '../../policy';
-import { MODES, useAppStore } from '../../store';
-import { theme, toneColor } from '../../theme';
+import { getAllModeDefinitions } from '../../modes';
+import { colors, radius, spacing, typography } from '../../theme';
+
+/**
+ * Enforcement tone -> design-system colour.
+ *
+ * ENFORCEMENT_PRESENTATION owns the label and the tone NAME; the theme owns what that tone
+ * looks like. Keeping the join here means neither has to know about the other, and the screen
+ * still cannot invent its own status colours.
+ */
+const TONE_COLOR: Record<string, string> = {
+  success: colors.success,
+  warning: colors.warning,
+  danger: colors.danger,
+  info: colors.info,
+  neutral: colors.neutral,
+};
 
 const CHANNEL_SECTIONS: { channel: Channel; title: string; placeholder: string }[] = [
   { channel: 'calls', title: 'Calls', placeholder: 'Add a contact, e.g. Mom' },
@@ -36,11 +51,24 @@ export interface PriorityScreenProps {
   onApply?: (channels: Record<Channel, boolean>) => ChannelEnforcement[] | null;
 }
 
+/** Study and Sleep, from the mode files. Focus was cut (ADR-004), so there is no third tab. */
+const MODE_TABS = getAllModeDefinitions().map((m) => ({ key: m.modeKey, label: m.name }));
+
 export default function PriorityScreen({ onApply }: PriorityScreenProps) {
-  const mode = useAppStore((st) => st.mode);
-  const setMode = useAppStore((st) => st.setMode);
-  const lastEnforcement = useAppStore((st) => st.lastEnforcement);
-  const setLastEnforcement = useAppStore((st) => st.setLastEnforcement);
+  // Which tab is open and what the last Apply reported are both genuinely UI-only: nothing
+  // outside this screen needs either, so neither belongs in the shared store.
+  const [modeKey, setModeKey] = useState<string>(MODE_TABS[0]?.key ?? 'study');
+  const [lastEnforcement, setLastEnforcement] = useState<ChannelEnforcement[] | null>(null);
+
+  /**
+   * The real profile row id, resolved from the mode key.
+   *
+   * NOT the mode key itself. Profiles are seeded as `profile_study` / `profile_sleep`, so a
+   * screen that keyed preferences on "study" would write rows nothing else in the app could
+   * find. Resolved through the memory layer's public API rather than rebuilt from a string
+   * template, so the id convention stays owned by one place.
+   */
+  const [profileId, setProfileId] = useState<string | null>(null);
 
   const [prefs, setPrefs] = useState<PriorityPreference[]>([]);
   const [drafts, setDrafts] = useState<Record<string, string>>({});
@@ -48,26 +76,34 @@ export default function PriorityScreen({ onApply }: PriorityScreenProps) {
 
   const reload = useCallback(async () => {
     try {
-      setPrefs(await priorityRepository.listForProfile(mode));
+      const profile = await resolveProfileForActivity(modeKey);
+      if (!profile) {
+        setProfileId(null);
+        setPrefs([]);
+        setError('That context has not been set up yet.');
+        return;
+      }
+      setProfileId(profile.id);
+      setPrefs(await priorityRepository.listForProfile(profile.id));
       setError(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not read saved preferences.');
     }
-  }, [mode]);
+  }, [modeKey]);
 
   useEffect(() => {
     void reload();
   }, [reload]);
 
-  const resolved = resolvePriority(mode, prefs);
+  const resolved = resolvePriority(profileId ?? '', prefs);
   const enforcement = describeEnforcement(resolved, lastEnforcement);
 
   const add = async (channel: Channel) => {
     const subject = (drafts[channel] ?? '').trim();
-    if (!subject) return;
+    if (!subject || !profileId) return;
     try {
       await priorityRepository.addPreference({
-        profileId: mode,
+        profileId,
         channel,
         subject,
         subjectKind: channel === 'whatsapp' && /group/i.test(subject) ? 'contactGroup' : 'contact',
@@ -92,13 +128,13 @@ export default function PriorityScreen({ onApply }: PriorityScreenProps) {
       <Text style={s.h1}>Priority</Text>
 
       <View style={s.row}>
-        {MODES.map((m) => (
+        {MODE_TABS.map((m) => (
           <Pressable
-            key={m.id}
-            onPress={() => setMode(m.id)}
-            style={[s.chip, mode === m.id && s.chipOn]}
+            key={m.key}
+            onPress={() => setModeKey(m.key)}
+            style={[s.chip, modeKey === m.key && s.chipOn]}
           >
-            <Text style={[s.chipText, mode === m.id && s.chipTextOn]}>{m.label}</Text>
+            <Text style={[s.chipText, modeKey === m.key && s.chipTextOn]}>{m.label}</Text>
           </Pressable>
         ))}
       </View>
@@ -118,7 +154,12 @@ export default function PriorityScreen({ onApply }: PriorityScreenProps) {
             <View style={s.sectionHead}>
               <Text style={s.h2}>{title}</Text>
               {presentation ? (
-                <View style={[s.badge, { backgroundColor: toneColor(presentation.tone) }]}>
+                <View
+                  style={[
+                    s.badge,
+                    { backgroundColor: TONE_COLOR[presentation.tone] ?? colors.neutral },
+                  ]}
+                >
                   <Text style={s.badgeText}>{presentation.label}</Text>
                 </View>
               ) : null}
@@ -161,7 +202,7 @@ export default function PriorityScreen({ onApply }: PriorityScreenProps) {
               <TextInput
                 style={s.input}
                 placeholder={placeholder}
-                placeholderTextColor={theme.color.textFaint}
+                placeholderTextColor={colors.textTertiary}
                 value={drafts[channel] ?? ''}
                 onChangeText={(t) => setDrafts((d) => ({ ...d, [channel]: t }))}
                 onSubmitEditing={() => void add(channel)}
@@ -203,90 +244,122 @@ export default function PriorityScreen({ onApply }: PriorityScreenProps) {
 
 const s = StyleSheet.create({
   root: {
-    padding: theme.space.xl,
+    padding: spacing.xl,
     paddingTop: 56,
-    gap: theme.space.md,
-    backgroundColor: theme.color.bg,
+    gap: spacing.md,
+    backgroundColor: colors.background,
     minHeight: '100%',
   },
-  h1: { fontSize: theme.font.hero, fontWeight: '700', color: theme.color.text },
-  h2: { fontSize: theme.font.lg, fontWeight: '700', color: theme.color.text },
-  row: { flexDirection: 'row', gap: theme.space.sm, flexWrap: 'wrap' },
+  h1: { ...typography.presets.h1, color: colors.textPrimary },
+  h2: { ...typography.presets.h3, color: colors.textPrimary },
+  row: { flexDirection: 'row', gap: spacing.sm, flexWrap: 'wrap' },
   chip: {
-    paddingHorizontal: theme.space.lg,
-    paddingVertical: theme.space.sm,
-    borderRadius: theme.radius.pill,
-    backgroundColor: theme.color.surfaceAlt,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.sm,
+    borderRadius: radius.pill,
+    backgroundColor: colors.surfaceElevated,
   },
-  chipOn: { backgroundColor: theme.color.accent },
-  chipText: { color: theme.color.textDim, fontWeight: '600', fontSize: theme.font.base },
-  chipTextOn: { color: '#FFFFFF' },
+  chipOn: { backgroundColor: colors.primary },
+  chipText: {
+    color: colors.textSecondary,
+    fontWeight: typography.weight.semiBold,
+    fontSize: typography.size.md,
+  },
+  chipTextOn: { color: colors.textInverse },
   section: {
-    marginTop: theme.space.lg,
-    gap: theme.space.sm,
-    backgroundColor: theme.color.surface,
-    borderRadius: theme.radius.md,
-    padding: theme.space.lg,
+    marginTop: spacing.lg,
+    gap: spacing.sm,
+    backgroundColor: colors.surface,
+    borderRadius: radius.lg,
+    padding: spacing.lg,
+    borderWidth: 1,
+    borderColor: colors.border,
   },
   sectionHead: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    gap: theme.space.sm,
+    gap: spacing.sm,
   },
   badge: {
-    paddingHorizontal: theme.space.md,
-    paddingVertical: theme.space.xs,
-    borderRadius: theme.radius.pill,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs,
+    borderRadius: radius.pill,
   },
-  badgeText: { color: '#FFFFFF', fontSize: theme.font.sm, fontWeight: '700' },
-  note: { color: theme.color.textFaint, fontSize: theme.font.sm, lineHeight: 18 },
-  empty: { color: theme.color.textFaint, fontSize: theme.font.sm, fontStyle: 'italic' },
+  badgeText: {
+    color: colors.textInverse,
+    fontSize: typography.size.xs,
+    fontWeight: typography.weight.bold,
+  },
+  note: { ...typography.presets.caption, color: colors.textSecondary },
+  empty: { ...typography.presets.caption, color: colors.textTertiary, fontStyle: 'italic' },
   item: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingVertical: theme.space.sm,
+    paddingVertical: spacing.sm,
   },
-  itemMain: { flexDirection: 'row', alignItems: 'center', gap: theme.space.md, flex: 1 },
-  tick: { color: theme.color.textFaint, fontSize: theme.font.sm, fontWeight: '700', width: 28 },
-  tickOn: { color: '#4ADE80' },
-  itemText: { color: theme.color.text, fontSize: theme.font.base },
-  itemTextOff: { color: theme.color.textFaint, textDecorationLine: 'line-through' },
-  tag: { color: theme.color.textFaint, fontSize: theme.font.sm },
-  remove: { color: '#E5726B', fontSize: theme.font.sm },
-  addRow: { flexDirection: 'row', gap: theme.space.sm, marginTop: theme.space.sm },
+  itemMain: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, flex: 1 },
+  tick: {
+    color: colors.textTertiary,
+    fontSize: typography.size.xs,
+    fontWeight: typography.weight.bold,
+    width: 28,
+  },
+  tickOn: { color: colors.success },
+  itemText: { ...typography.presets.body, color: colors.textPrimary },
+  itemTextOff: { color: colors.textTertiary, textDecorationLine: 'line-through' },
+  tag: { fontSize: typography.size.xs, color: colors.textTertiary },
+  remove: { fontSize: typography.size.sm, color: colors.danger },
+  addRow: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.sm },
   input: {
     flex: 1,
-    backgroundColor: theme.color.surfaceAlt,
-    borderRadius: theme.radius.sm,
-    paddingHorizontal: theme.space.md,
-    paddingVertical: theme.space.sm,
-    color: theme.color.text,
-    fontSize: theme.font.base,
+    backgroundColor: colors.surfaceElevated,
+    borderRadius: radius.md,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    color: colors.textPrimary,
+    fontSize: typography.size.md,
   },
   addBtn: {
-    backgroundColor: theme.color.accent,
-    borderRadius: theme.radius.sm,
-    paddingHorizontal: theme.space.lg,
+    backgroundColor: colors.primary,
+    borderRadius: radius.md,
+    paddingHorizontal: spacing.lg,
     justifyContent: 'center',
   },
-  addBtnText: { color: '#FFFFFF', fontWeight: '700', fontSize: theme.font.base },
-  warn: {
-    backgroundColor: '#3A2E12',
-    borderRadius: theme.radius.md,
-    padding: theme.space.lg,
-    gap: theme.space.xs,
+  addBtnText: {
+    color: colors.textInverse,
+    fontWeight: typography.weight.bold,
+    fontSize: typography.size.md,
   },
-  warnTitle: { color: theme.color.text, fontWeight: '700', fontSize: theme.font.base },
-  warnBody: { color: '#D9C9A3', fontSize: theme.font.sm, lineHeight: 18 },
-  error: { color: '#E5726B', fontSize: theme.font.sm },
+  // A warning, not a failure: the preference IS saved, it just will not fire unstarred.
+  // Carried by a warning-coloured rule rather than a filled block, which the light palette
+  // would otherwise turn into something that reads like an error.
+  warn: {
+    backgroundColor: colors.surfaceElevated,
+    borderLeftWidth: 4,
+    borderLeftColor: colors.warning,
+    borderRadius: radius.md,
+    padding: spacing.lg,
+    gap: spacing.xs,
+  },
+  warnTitle: {
+    color: colors.textPrimary,
+    fontWeight: typography.weight.bold,
+    fontSize: typography.size.md,
+  },
+  warnBody: { ...typography.presets.caption, color: colors.textSecondary },
+  error: { fontSize: typography.size.sm, color: colors.danger },
   apply: {
-    marginTop: theme.space.lg,
-    backgroundColor: theme.color.accent,
-    borderRadius: theme.radius.md,
-    padding: theme.space.lg,
+    marginTop: spacing.lg,
+    backgroundColor: colors.primary,
+    borderRadius: radius.lg,
+    padding: spacing.lg,
     alignItems: 'center',
   },
-  applyText: { color: '#FFFFFF', fontWeight: '700', fontSize: theme.font.lg },
+  applyText: {
+    color: colors.textInverse,
+    fontWeight: typography.weight.bold,
+    fontSize: typography.size.lg,
+  },
 });
