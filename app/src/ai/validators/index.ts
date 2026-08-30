@@ -10,4 +10,4 @@
  *   - confidence < CONFIDENCE_THRESHOLD returns a Clarification, not an Intent
  */
 
-export {};
+export { IntentValidator } from './IntentValidator';

@@ -21,6 +21,7 @@ import type {
   PermissionRequirement,
   RingerMode,
 } from '../types';
+import { PERMISSION_LABELS } from './permissions';
 
 /** Simulated device state. Starts at plausible "normal phone" values. */
 interface MockState {
@@ -68,42 +69,25 @@ export function __resetMockState(): void {
   };
 }
 
-const PERMISSION_LABELS: Record<
-  PermissionRequirement['key'],
-  Omit<PermissionRequirement, 'granted'>
-> = {
-  notification_policy: {
-    key: 'notification_policy',
-    label: 'Do Not Disturb access',
-    rationale: 'Lets Ally quiet notifications while a context is active.',
-  },
-  write_settings: {
-    key: 'write_settings',
-    label: 'Modify system settings',
-    rationale: 'Lets Ally change screen brightness and put it back afterwards.',
-  },
-  microphone: {
-    key: 'microphone',
-    label: 'Microphone',
-    rationale: 'Lets you tell Ally what you are doing instead of typing it.',
-  },
-  exact_alarm: {
-    key: 'exact_alarm',
-    label: 'Alarms & reminders',
-    rationale: 'Lets Ally set the wake alarm you ask for.',
-  },
-};
-
 function permission(key: PermissionRequirement['key']): PermissionRequirement {
   return { ...PERMISSION_LABELS[key], granted: state.permissions[key] };
 }
 
-function blocked(capability: Capability, key: PermissionRequirement['key']): ActionResult {
+/**
+ * PARITY (ADR-007): the native backend reports the CURRENT value on both sides of a blocked
+ * call, so the UI can render "priority -> priority" as visible proof nothing moved. The mock
+ * must do the same or the two backends disagree on the shape of a denial.
+ */
+function blocked(
+  capability: Capability,
+  key: PermissionRequirement['key'],
+  current: CapabilityValue | null,
+): ActionResult {
   return {
     capability,
     status: 'permission_needed',
-    beforeValue: null,
-    afterValue: null,
+    beforeValue: current,
+    afterValue: current,
     message: `${PERMISSION_LABELS[key].label} is needed before Ally can change this.`,
   };
 }
@@ -132,7 +116,9 @@ function makeCapability<K extends keyof MockState>(
     },
 
     async execute(value) {
-      if (!state.permissions[permissionKey]) return blocked(capability, permissionKey);
+      if (!state.permissions[permissionKey]) {
+        return blocked(capability, permissionKey, state[field] as CapabilityValue | null);
+      }
 
       const before = state[field] as CapabilityValue | null;
       state[field] = value as MockState[K];
@@ -160,7 +146,9 @@ function makeCapability<K extends keyof MockState>(
     },
 
     async restore(previous) {
-      if (!state.permissions[permissionKey]) return blocked(capability, permissionKey);
+      if (!state.permissions[permissionKey]) {
+        return blocked(capability, permissionKey, state[field] as CapabilityValue | null);
+      }
 
       const before = state[field] as CapabilityValue | null;
       state[field] = previous as MockState[K];
@@ -210,7 +198,7 @@ const alarm: DeviceCapability = {
     return null;
   },
   async execute(value) {
-    if (!state.permissions.exact_alarm) return blocked('alarm', 'exact_alarm');
+    if (!state.permissions.exact_alarm) return blocked('alarm', 'exact_alarm', null);
     state.alarm = String(value);
     return {
       capability: 'alarm',

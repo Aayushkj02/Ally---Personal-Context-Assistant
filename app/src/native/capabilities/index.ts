@@ -1,14 +1,83 @@
 /**
  * OWNER: AAYUSH — tasks T3 (DND), T4 (brightness), T5 (alarm)
  *
- * Real, Kotlin-backed implementations of DeviceCapability — one file per capability:
- *   DndCapability.ts, BrightnessCapability.ts, AlarmCapability.ts, RingerCapability.ts
+ * Real, native-backed DeviceCapability implementations.
  *
- * PARITY OBLIGATION (ADR-007): whatever changes here changes in ../MockDevice.ts in
- * the SAME commit. A drifted mock is worse than no mock.
+ * STATE: DND (T3) and brightness (T4) are implemented. Ringer and alarm (T5) are still
+ * `pendingCapability` — they answer `isAvailable() === false` and return
+ * `not_supported` from execute/restore.
  *
- * isAvailable() must be HONEST, not optimistic. A truthful `not_supported` scores
- * better than a fake success — see the DND ladder in ADR-102 and docs/DEVICE_NOTES.md.
+ * That is deliberate and is the whole point of the architecture: an unimplemented
+ * capability must say so out loud. A truthful "not supported on this device" scores
+ * better than a fake success (PRD 20 / NFR-03), and it means the action engine, the
+ * policy layer and the UI can all be exercised end-to-end before T3 lands.
+ *
+ * T3/T4 replace one entry at a time. PARITY OBLIGATION (ADR-007): whatever changes
+ * here changes in ../MockDevice.ts in the SAME commit.
  */
 
-export {};
+import type {
+  ActionResult,
+  Capability,
+  CapabilityValue,
+  DeviceCapability,
+  PermissionRequirement,
+} from '../../types';
+import type { AllyNativeSpec } from '../../../modules/ally-native';
+import { describePermission } from '../permissions';
+import { createDndCapability } from './DndCapability';
+import { createBrightnessCapability } from './BrightnessCapability';
+
+/**
+ * A capability whose native implementation has not landed yet.
+ * Reports permissions honestly; refuses to pretend it can act.
+ */
+export function pendingCapability(
+  capability: Capability,
+  permissionKey: PermissionRequirement['key'],
+  native: AllyNativeSpec,
+  taskId: string,
+): DeviceCapability {
+  const unsupported = (): ActionResult => ({
+    capability,
+    status: 'not_supported',
+    beforeValue: null,
+    afterValue: null,
+    message: `Ally cannot change this yet (${taskId} not implemented).`,
+  });
+
+  return {
+    async isAvailable() {
+      return false;
+    },
+
+    async requiredPermissions() {
+      return [describePermission(permissionKey, native.getPermissionStatus(permissionKey))];
+    },
+
+    async snapshot(): Promise<CapabilityValue | null> {
+      return null;
+    },
+
+    async execute() {
+      return unsupported();
+    },
+
+    async restore() {
+      return unsupported();
+    },
+  };
+}
+
+/** Builds the full native capability set. T3/T4/T5 swap entries out of `pendingCapability`. */
+export function createNativeCapabilities(
+  native: AllyNativeSpec,
+): Record<Capability, DeviceCapability> {
+  return {
+    dnd: createDndCapability(native),
+    brightness: createBrightnessCapability(native),
+    // Ringer is a separate capability from DND and is not part of T3.
+    ringer: pendingCapability('ringer', 'notification_policy', native, 'T5'),
+    alarm: pendingCapability('alarm', 'exact_alarm', native, 'T5'),
+  };
+}

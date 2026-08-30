@@ -4,7 +4,7 @@
  * Dhrey's repositories return these; everyone else consumes them read-only.
  */
 
-import type { Capability, CapabilityValue } from './capability';
+import type { Capability, CapabilityValue, Channel } from './capability';
 import type { ActionStatus, SessionState } from './policy';
 import type { Persistence } from './intent';
 
@@ -28,6 +28,32 @@ export interface Preference {
    * Powers the Memory screen: "because you said '…' on Aug 29".
    * This provenance is the novelty argument — do not drop it.
    */
+  sourceCommand: string | null;
+  createdAt: number;
+}
+
+/**
+ * A durable, mode-scoped decision about who may reach the user on a given channel.
+ *
+ * Distinct from TemporaryOverride, which is time-bounded and expires. This is the
+ * standing priority list: "during Sleep, Mom can call me."
+ *
+ * `enforceable` is not decoration. WhatsApp preferences are remembered but Android
+ * provides no way to act on them, and the UI must show that difference rather than
+ * implying the phone is doing something it is not (ADR-111).
+ */
+export interface PriorityPreference {
+  id: string;
+  /** Mode-scoped: Study, Sleep and Focus each keep their own list. */
+  profileId: string;
+  channel: Channel;
+  /** The person or group as the user named them: "Mom", "Family Group". */
+  subject: string;
+  subjectKind: 'contact' | 'contactGroup';
+  enabled: boolean;
+  /** False for whatsapp. Drives the honest "remembered, not enforced" UI state. */
+  enforceable: boolean;
+  /** Verbatim command that created this, for the Memory screen's provenance. */
   sourceCommand: string | null;
   createdAt: number;
 }
