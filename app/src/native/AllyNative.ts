@@ -13,6 +13,7 @@ import type {
   DeviceRegistry,
   PermissionRequirement,
 } from '../types';
+import type { BorrowedPolicy } from '../actions/executors';
 import AllyNative, { type AllyNativeDeviceInfo } from '../../modules/ally-native';
 import { createNativeCapabilities } from './capabilities';
 
@@ -75,6 +76,34 @@ export function applyPriorityPreferences(prefs: {
   }));
 
   return { ok: raw.ok === true, channels };
+}
+
+/**
+ * The user's own NotificationManager.Policy, as a port the restore walk can reach (ADR-125).
+ *
+ * Null on the mock backend, exactly like `createNativeRegistry()` — src/native/index.ts picks
+ * the matching mock so the layers above never learn which one they got.
+ *
+ * The durability, the first-write-wins capture and the retain-on-failure rule all live in
+ * DndController; nothing here re-decides any of it. This is a two-method window onto that store,
+ * and it exists because priority mutates the policy from outside the ActionPlan, so restore
+ * needs a way to give it back that does not depend on a `dnd` snapshot row existing.
+ */
+export function createBorrowedPolicy(): BorrowedPolicy | null {
+  if (!AllyNative) return null;
+
+  const native = AllyNative;
+  return {
+    hasSaved: () => native.dndHasSavedPolicy(),
+    restore: () => {
+      const raw = native.dndRestorePolicy();
+      return {
+        ok: raw.ok === true,
+        restored: raw.restored === true,
+        reason: raw.reason ?? null,
+      };
+    },
+  };
 }
 
 /** Priority-caller exception + Android's repeat-caller bypass (ADR-107). */

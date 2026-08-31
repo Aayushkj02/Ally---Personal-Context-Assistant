@@ -16,6 +16,7 @@ import type { ActionResult, CapabilityValue, Channel, DndMode } from './src/type
 import { STATUS_PRESENTATION } from './src/types';
 import {
   device,
+  borrowedPolicy,
   getNativeDeviceInfo,
   runDndProbe,
   applyPriorityPreferences,
@@ -165,6 +166,9 @@ export default function App() {
               registry: device,
               snapshots,
               hooks: sessionHooks,
+              // Priority rewrote the user's notification policy from outside the plan, so ending
+              // has to be able to give it back even with no `dnd` row to carry it (ADR-125).
+              policy: borrowedPolicy,
             });
             setResults(r.results);
             setState(r.state);
@@ -342,7 +346,7 @@ function DeviceHarness({
       // coordinator's job — the harness no longer decides when it is safe to drop rows.
       const { state, results, summary, cleared, retryable } = await endContextLifecycle(
         active.session.id,
-        { registry: device, snapshots, hooks: sessionHooks },
+        { registry: device, snapshots, hooks: sessionHooks, policy: borrowedPolicy },
       );
 
       setLog(results.slice().reverse());

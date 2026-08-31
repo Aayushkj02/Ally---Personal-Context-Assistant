@@ -9,7 +9,13 @@
  */
 
 export { executePlan, restoreSession, lifoOrder } from './executors';
-export type { ActionPhase, ActionProgress, ExecutionDeps, RestoreDeps } from './executors';
+export type {
+  ActionPhase,
+  ActionProgress,
+  BorrowedPolicy,
+  ExecutionDeps,
+  RestoreDeps,
+} from './executors';
 export { checkPermissions, permissionNeededResult } from './PermissionGate';
 export type { PermissionCheck } from './PermissionGate';
 export {

@@ -10,17 +10,28 @@
  */
 
 import type { DeviceRegistry } from '../types';
+import type { BorrowedPolicy } from '../actions/executors';
 import {
   createNativeRegistry,
+  createBorrowedPolicy,
   getNativeDeviceInfo,
   runDndProbe,
   setPriorityCallers,
   applyPriorityPreferences,
   analyseCallLog,
 } from './AllyNative';
-import { mockRegistry } from './MockDevice';
+import { mockRegistry, mockBorrowedPolicy } from './MockDevice';
 
 export const device: DeviceRegistry = createNativeRegistry() ?? mockRegistry;
+
+/**
+ * The user's own notification policy, from whichever backend is live (ADR-125).
+ *
+ * Selected here, beside the registry, so the two can never disagree about which phone they are
+ * talking to. Restore has to be able to give this back even when no `dnd` action was planned,
+ * because priority rewrites it from outside the ActionPlan.
+ */
+export const borrowedPolicy: BorrowedPolicy = createBorrowedPolicy() ?? mockBorrowedPolicy;
 
 export const isMockBackend = device.backend === 'mock';
 

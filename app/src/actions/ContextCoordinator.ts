@@ -30,7 +30,7 @@ import type {
   DeviceRegistry,
   SessionState,
 } from '../types';
-import { executePlan, restoreSession, type ActionProgress } from './executors';
+import { executePlan, restoreSession, type ActionProgress, type BorrowedPolicy } from './executors';
 import type { SnapshotStore } from './SnapshotStore';
 import {
   summarisePlan,
@@ -99,6 +99,15 @@ export interface CoordinatorDeps {
    * second priority policy from growing here.
    */
   applyPriority?: () => Promise<ChannelEnforcement[] | null>;
+  /**
+   * The user's own notification policy, when the backend keeps one.
+   *
+   * Wired for the same reason `applyPriority` is: priority rewrites that policy from outside the
+   * plan, so ending a context has to be able to give it back even when no `dnd` action was ever
+   * planned (ADR-125). Passing the applier without this one is the asymmetry that made the
+   * change irreversible in the first place.
+   */
+  policy?: BorrowedPolicy;
 }
 
 export interface StartContextResult {
@@ -221,7 +230,12 @@ export async function endContext(
 ): Promise<EndContextResult> {
   const { registry, snapshots, hooks, onProgress } = deps;
 
-  const results = await restoreSession(sessionId, { registry, snapshots, onProgress });
+  const results = await restoreSession(sessionId, {
+    registry,
+    snapshots,
+    onProgress,
+    policy: deps.policy,
+  });
   const summary = summariseRestore(results);
   const state: ContextState = summary.state;
 
