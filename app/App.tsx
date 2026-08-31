@@ -36,7 +36,13 @@ import { activateFromText } from './src/services/contextOrchestrator';
 import { useRoute } from './src/navigation';
 import { ActiveContextScreen } from './src/screens';
 import { applyPriorityForActivity } from './src/services/priorityIntegration';
-import { ensureSeeded, getActiveContext, markSessionActive, endSession } from './src/memory';
+import {
+  ensureSeeded,
+  getActiveContext,
+  markSessionActive,
+  endSession,
+  profileRepository,
+} from './src/memory';
 
 /**
  * A-V3: the coordinator's session hooks, wired to Dhrey's PUBLIC session API.
@@ -58,6 +64,15 @@ const sessionHooks: LifecycleHooks = {
  * executor receives. Nothing here constructs a plan by hand.
  */
 const STUDY_COMMAND = "I'm going to study for two hours.";
+
+/**
+ * The value the harness "teaches" Ally for Study (Phase 4, A4.1).
+ *
+ * Deliberately NOT 40. study.json's default IS 40, so teaching 40 would look identical on the
+ * phone whether the preference reached the device or not, and would prove nothing.
+ */
+const TAUGHT_BRIGHTNESS = 25;
+const TAUGHT_SENTENCE = `Remember that I prefer ${TAUGHT_BRIGHTNESS}% brightness during study`;
 
 const DND_TESTS: { label: string; value: DndMode }[] = [
   { label: 'Priority', value: 'priority' },
@@ -244,6 +259,54 @@ function DeviceHarness({
   // current reading — otherwise "restore" just re-applies whatever we last set.
   const [originalBright, setOriginalBright] = useState<CapabilityValue | null>(null);
   const brightness = device.get('brightness');
+  /** What Ally currently remembers for Study, read back from Dhrey's table. */
+  const [taught, setTaught] = useState('nothing');
+
+  /**
+   * Reads the stored preferences back so the harness reports the DATABASE, not what the last
+   * button press intended. Same rule as everything else here — never show a value we did not read.
+   */
+  const refreshTaught = useCallback(async () => {
+    try {
+      await ensureSeeded();
+      const rows = await profileRepository.getPreferencesByProfile('profile_study');
+      setTaught(
+        rows.length === 0
+          ? 'nothing'
+          : rows.map((r) => `${r.capability}=${String(r.value)} (${r.source})`).join(', '),
+      );
+    } catch {
+      setTaught('could not read');
+    }
+  }, []);
+
+  /**
+   * Writes the preference a teaching command will eventually write.
+   *
+   * Dhrey's public repository, unmodified — this is not a second store and it decides no policy.
+   * It exists because nothing yet turns the sentence into a row, and the Phase 4 gate has to be
+   * demonstrable on the phone rather than only in jest.
+   */
+  const teachBrightness = useCallback(async () => {
+    await ensureSeeded();
+    await profileRepository.createPreference({
+      id: `taught_brightness_${Date.now().toString(36)}`,
+      profileId: 'profile_study',
+      capability: 'brightness',
+      value: TAUGHT_BRIGHTNESS,
+      source: 'user',
+      // The provenance that makes this a memory rather than a setting.
+      sourceCommand: TAUGHT_SENTENCE,
+      createdAt: Date.now(),
+    });
+    await refreshTaught();
+  }, [refreshTaught]);
+
+  const forgetTaught = useCallback(async () => {
+    const rows = await profileRepository.getPreferencesByProfile('profile_study');
+    for (const row of rows) await profileRepository.deletePreference(row.id);
+    await refreshTaught();
+  }, [refreshTaught]);
 
   const refresh = useCallback(async () => {
     setAvailable(await dnd.isAvailable());
@@ -257,7 +320,8 @@ function DeviceHarness({
 
   useEffect(() => {
     void refresh();
-  }, [refresh]);
+    void refreshTaught();
+  }, [refresh, refreshTaught]);
 
   const run = useCallback(
     async (value: DndMode) => {
@@ -448,6 +512,26 @@ function DeviceHarness({
         End context reads the session from the database, so it still works after the app has been
         force-stopped and reopened. That is the A-V2 proof.
       </Text>
+
+      <View style={styles.divider} />
+      <Text style={styles.section}>Learned preference (Phase 4)</Text>
+      <Text style={styles.info}>
+        Stands in for the teaching command, which does not exist yet: Shlok&apos;s parser classifies
+        &quot;remember I prefer {TAUGHT_BRIGHTNESS}% when studying&quot; as operation: teach, and
+        nothing consumes that. These two buttons call Dhrey&apos;s preference repository directly —
+        the same rows a real teach handler will write. Teach, then run the Study sentence:
+        brightness should go to {TAUGHT_BRIGHTNESS}%, not the 40% study.json asks for, and END must
+        still return the exact value you started from.
+      </Text>
+      <Text style={styles.info}>
+        remembered: <Text style={styles.strong}>{taught}</Text>
+      </Text>
+      <Pressable style={[styles.btn, styles.btnProbe]} onPress={() => void teachBrightness()}>
+        <Text style={styles.btnText}>Teach {TAUGHT_BRIGHTNESS}% brightness for Study</Text>
+      </Pressable>
+      <Pressable style={[styles.btn, styles.btnProbe]} onPress={() => void forgetTaught()}>
+        <Text style={styles.btnText}>Forget taught preferences</Text>
+      </Pressable>
 
       <View style={styles.divider} />
       <Text style={styles.section}>Brightness (T4)</Text>
