@@ -247,7 +247,26 @@ Because entries never move and IDs never collide, a merge conflict here is alway
 - **Impact:** All Phase 5 sleep entry-points, wake-up times, weekday recurrence rules, alarm adjustments, and
   cancellations are validated and structured deterministically across both fallback and Ollama parsers.
 
+### ADR-206 — Conversational robustness, ambiguity clarification, and hardware-independent evaluation
+- **Date:** 2026-08-31 · **Author:** Shlok · **Phase:** 6 · **Status:** Accepted
+- **Decision:** Conversational focus and workplace variations ("Start study mode", "I need to focus for two hours",
+  "Turn on study", "Focus for 45 minutes") map directly to the `study` context profile. Genuinely ambiguous requests
+  without an explicit target ("Change the setting", "Let them through", "Set it for later", "Adjust settings")
+  produce `Clarification` rather than guessing contacts, modes, or durations. Evaluation dataset is extended to 70
+  representative cases tracking intent, fallback, clarification, and regression accuracy.
+- **Hardware constraint note:** Physical Office Kit hardware is not available until the team qualifies for the
+  Pune round; all AI evaluation runs entirely on software models / on-device fallback and validates against the Samsung
+  S24 Ultra test harness without physical kit dependencies.
+- **Reason:** Enforces PRD §20 (Truthful Feedback) and NFR-03 (Never fake success). Guessing user intent on ambiguous
+  commands causes unintended device mutations. Mapping workplace focus phrasing to `study` fulfills ADR-004
+  (Study and Sleep profile model) without creating unsupported modes.
+- **Alternatives considered:** Hallucinate hardware Office Kit signals — rejected; no hardware is present before
+  Pune qualification. Guess "Mom" or "parents" for "let them through" — rejected; dangerous ambiguity.
+- **Impact:** Eval suite expands to 70 cases with >= 90% accuracy benchmark. Conversational natural language is
+  broadened while preserving deterministic security and clarification boundaries.
+
 ---
+
 
 
 

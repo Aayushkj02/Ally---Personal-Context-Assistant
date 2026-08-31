@@ -262,4 +262,125 @@ export const EVAL_DATASET: TestCase[] = [
     expectedActivity: 'study',
     expectedOperation: 'deactivate',
   },
+
+  // Golden 12: Conversational study & workplace focus variations (Phase 6 S6.1, S6.2)
+  {
+    id: 51,
+    input: 'Start study mode.',
+    expectedActivity: 'study',
+    expectedOperation: 'activate',
+  },
+  {
+    id: 52,
+    input: "I'm going to study.",
+    expectedActivity: 'study',
+    expectedOperation: 'activate',
+  },
+  {
+    id: 53,
+    input: 'Turn on study.',
+    expectedActivity: 'study',
+    expectedOperation: 'activate',
+  },
+  {
+    id: 54,
+    input: 'I need to focus for two hours.',
+    expectedActivity: 'study',
+    expectedOperation: 'activate',
+  },
+  {
+    id: 55,
+    input: 'Focus for 45 minutes.',
+    expectedActivity: 'study',
+    expectedOperation: 'activate',
+  },
+  {
+    id: 56,
+    input: 'Put my phone on silent for study.',
+    expectedActivity: 'study',
+    expectedOperation: 'activate',
+  },
+
+  // Golden 13: Sleep and wake-up variations (Phase 5 / Phase 6 S6.1)
+  {
+    id: 57,
+    input: "I'm sleeping now.",
+    expectedActivity: 'sleep',
+    expectedOperation: 'activate',
+  },
+  {
+    id: 58,
+    input: 'Wake me at 6:30 tomorrow.',
+    expectedActivity: 'sleep',
+  },
+  {
+    id: 59,
+    input: "Move tomorrow's alarm to 8.",
+    expectedActivity: 'sleep',
+    expectedOperation: 'modify',
+  },
+  {
+    id: 60,
+    input: 'Cancel the wake-up alarm.',
+    expectedActivity: 'sleep',
+    expectedOperation: 'modify',
+  },
+
+  // Golden 14: Clarification & ambiguity handling (Phase 6 S6.3, S6.4)
+  {
+    id: 61,
+    input: 'Change the setting.',
+    expectedActivity: 'unknown',
+  },
+  {
+    id: 62,
+    input: 'Let them through.',
+    expectedActivity: 'unknown',
+  },
+  {
+    id: 63,
+    input: 'Set it for later.',
+    expectedActivity: 'unknown',
+  },
+  {
+    id: 64,
+    input: 'Do something.',
+    expectedActivity: 'unknown',
+  },
+  {
+    id: 65,
+    input: 'Adjust settings.',
+    expectedActivity: 'unknown',
+  },
+
+  // Golden 15: Memory, teaching & query variations (Phase 4 / Phase 6 S6.1)
+  {
+    id: 66,
+    input: 'Remember that Mom can call me during sleep.',
+    expectedActivity: 'sleep',
+    expectedOperation: 'teach',
+  },
+  {
+    id: 67,
+    input: "Always let my project group reach me while I'm studying.",
+    expectedActivity: 'study',
+    expectedOperation: 'teach',
+  },
+  {
+    id: 68,
+    input: 'Learn that I prefer 40% brightness during study.',
+    expectedActivity: 'study',
+    expectedOperation: 'teach',
+  },
+  {
+    id: 69,
+    input: 'What do you remember about my study mode?',
+    expectedActivity: 'study',
+    expectedOperation: 'query',
+  },
+  {
+    id: 70,
+    input: "Actually, don't let my project group message me during study.",
+    expectedActivity: 'study',
+  },
 ];

@@ -179,6 +179,9 @@ function extractRequestedChanges(text: string): Intent['requestedChanges'] {
   if (
     text.includes('keep silent') ||
     text.includes('keep the phone silent') ||
+    text.includes('phone on silent') ||
+    text.includes('on silent') ||
+    text.includes('set to silent') ||
     text.includes('ringer silent') ||
     text.includes('silent mode')
   ) {
@@ -400,6 +403,14 @@ function extractExceptions(rawText: string, normalized: string): Intent['excepti
     'that',
     'from',
     'this',
+    'them',
+    'him',
+    'her',
+    'someone',
+    'anyone',
+    'it',
+    'me',
+    'us',
   ];
 
   for (const pattern of contactPatterns) {
@@ -411,8 +422,13 @@ function extractExceptions(rawText: string, normalized: string): Intent['excepti
       const name = raw.replace(/'s$/i, '').trim();
       const nameLower = name.toLowerCase();
 
-      // Skip if the captured word is a group keyword or activity word
-      if (groupKeywords.includes(nameLower) || nameLower === 'study' || nameLower === 'sleep') {
+      // Skip if the captured word is a group keyword, pronoun, or activity word
+      if (
+        groupKeywords.includes(nameLower) ||
+        nameLower === 'study' ||
+        nameLower === 'sleep' ||
+        nameLower === 'focus'
+      ) {
         continue;
       }
 
@@ -478,9 +494,34 @@ export class FallbackParser implements IntentParser {
       };
     }
 
+    // Genuinely ambiguous requests without specified contact, mode, or action
+    const ambiguousPatterns = [
+      /^change\s+(?:the\s+)?setting(?:s)?\.?$/i,
+      /^let\s+(?:them|him|her|someone|anyone)\s+through\.?$/i,
+      /^set\s+it\s+for\s+later\.?$/i,
+      /^do\s+something\.?$/i,
+      /^help(?:\s+me)?\.?$/i,
+      /^turn\s+it\s+(?:on|off)\.?$/i,
+      /^adjust\s+settings\.?$/i,
+    ];
+
+    if (ambiguousPatterns.some((pattern) => pattern.test(normalized))) {
+      return {
+        kind: 'clarification',
+        question: 'Could you clarify what setting, contact, or mode you would like to adjust?',
+        options: ['Study', 'Sleep'],
+        rawText,
+      };
+    }
+
     let activity: Intent['activity'] = 'unknown';
 
-    if (normalized.includes('study') || normalized.includes('studying')) {
+    if (
+      normalized.includes('study') ||
+      normalized.includes('studying') ||
+      normalized.includes('focus') ||
+      normalized.includes('focusing')
+    ) {
       activity = 'study';
     } else if (
       normalized.includes('sleep') ||
@@ -560,9 +601,13 @@ export class FallbackParser implements IntentParser {
       normalized.includes('start') ||
       normalized.includes('activate') ||
       normalized.includes('focus for') ||
+      normalized.includes('need to focus') ||
       normalized.includes('keep this mode on') ||
       normalized.includes('sleeping now') ||
       normalized.includes('off to bed') ||
+      normalized.includes('turn on study') ||
+      normalized.includes('turn on sleep') ||
+      normalized.includes('put my phone on silent') ||
       normalized.startsWith('wake me') ||
       normalized.includes('wake me at') ||
       normalized.includes('wake me up')
