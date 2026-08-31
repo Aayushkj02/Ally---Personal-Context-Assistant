@@ -98,26 +98,71 @@ function extractDurationMinutes(text: string): number | null {
   return null;
 }
 
-function extractSchedule(text: string): Intent['schedule'] {
-  const timeMatch = text.match(/\b(?:at\s+)?(\d{1,2})(?::(\d{2}))?\s*(am|pm)\b/i);
+function parseTimeString(text: string): string | null {
+  // 1. Check for time with explicit AM/PM: "7 AM", "7:30 pm", "at 6:30 am", "to 8 am"
+  const ampmMatch = text.match(/\b(?:at|to|for)?\s*(\d{1,2})(?::(\d{2}))?\s*(am|pm)\b/i);
+  if (ampmMatch) {
+    let hour = Number(ampmMatch[1]);
+    const minute = Number(ampmMatch[2] ?? '00');
+    const period = ampmMatch[3]?.toLowerCase();
 
-  if (!timeMatch) {
+    if (hour < 1 || hour > 12 || minute < 0 || minute > 59) return null;
+
+    if (period === 'pm' && hour !== 12) {
+      hour += 12;
+    }
+    if (period === 'am' && hour === 12) {
+      hour = 0;
+    }
+    return `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
+  }
+
+  // 2. Check for time with colon: "at 6:30", "to 7:30", "6:30 tomorrow", "7:30"
+  const colonMatch = text.match(/\b(?:at|to|for)?\s*(\d{1,2}):(\d{2})\b/i);
+  if (colonMatch) {
+    const hour = Number(colonMatch[1]);
+    const minute = Number(colonMatch[2]);
+    if (hour < 0 || hour > 23 || minute < 0 || minute > 59) return null;
+    return `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
+  }
+
+  // 3. Check for single hour with wake/alarm context: "wake me at 7", "alarm to 8", "alarm at 8"
+  const singleHourMatch =
+    text.match(/\b(?:alarm|wake me|wake-up|wake up|wake)(?:\s+(?:to|at|for))?\s+(\d{1,2})\b/i) ||
+    text.match(/\b(?:at|to|for)\s+(\d{1,2})\s*(?:tomorrow)?\b/i);
+  if (singleHourMatch) {
+    const hour = Number(singleHourMatch[1]);
+    if (hour >= 1 && hour <= 12) {
+      // Default to morning alarm hour in wake-up/sleep context
+      return `${String(hour).padStart(2, '0')}:00`;
+    }
+  }
+
+  return null;
+}
+
+function extractSchedule(text: string): Intent['schedule'] {
+  if (
+    text.includes('cancel the wake-up alarm') ||
+    text.includes('cancel wake-up alarm') ||
+    text.includes('cancel the alarm') ||
+    text.includes('cancel alarm') ||
+    text.includes('turn off alarm') ||
+    text.includes('turn off the alarm') ||
+    text.includes('disable alarm') ||
+    text.includes('remove alarm')
+  ) {
+    return {
+      kind: 'none',
+      time: null,
+    };
+  }
+
+  const time = parseTimeString(text);
+
+  if (!time) {
     return null;
   }
-
-  let hour = Number(timeMatch[1]);
-  const minute = Number(timeMatch[2] ?? '00');
-  const period = timeMatch[3]?.toLowerCase();
-
-  if (period === 'pm' && hour !== 12) {
-    hour += 12;
-  }
-
-  if (period === 'am' && hour === 12) {
-    hour = 0;
-  }
-
-  const time = `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
 
   const kind = text.includes('weekday') ? 'weekdays' : 'once';
 
@@ -207,30 +252,32 @@ function extractRequestedChanges(text: string): Intent['requestedChanges'] {
     }
   }
 
-  // Alarm
-  const alarmMatch = text.match(
-    /\b(?:wake me|alarm|wake up)(?:\s+at)?\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)\b/i,
-  );
+  // Alarm (extracted when not a cancellation request)
+  const isAlarmCancellation =
+    text.includes('cancel the wake-up alarm') ||
+    text.includes('cancel wake-up alarm') ||
+    text.includes('cancel the alarm') ||
+    text.includes('cancel alarm') ||
+    text.includes('turn off alarm') ||
+    text.includes('turn off the alarm') ||
+    text.includes('disable alarm') ||
+    text.includes('remove alarm');
 
-  if (alarmMatch) {
-    let hour = Number(alarmMatch[1]);
-    const minute = Number(alarmMatch[2] ?? '00');
-    const period = alarmMatch[3]?.toLowerCase();
-
-    if (period === 'pm' && hour !== 12) {
-      hour += 12;
+  if (
+    !isAlarmCancellation &&
+    (text.includes('wake me') ||
+      text.includes('alarm') ||
+      text.includes('wake up') ||
+      text.includes('wake-up') ||
+      text.includes('wake'))
+  ) {
+    const alarmTime = parseTimeString(text);
+    if (alarmTime) {
+      changes.push({
+        capability: 'alarm',
+        value: alarmTime,
+      });
     }
-
-    if (period === 'am' && hour === 12) {
-      hour = 0;
-    }
-
-    const alarmTime = `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
-
-    changes.push({
-      capability: 'alarm',
-      value: alarmTime,
-    });
   }
 
   return changes;
@@ -438,7 +485,12 @@ export class FallbackParser implements IntentParser {
     } else if (
       normalized.includes('sleep') ||
       normalized.includes('sleeping') ||
-      normalized.includes('bed')
+      normalized.includes('bed') ||
+      normalized.includes('wake me') ||
+      normalized.includes('wake up') ||
+      normalized.includes('wake-up') ||
+      normalized.includes('wake') ||
+      normalized.includes('alarm')
     ) {
       activity = 'sleep';
     } else if (ctx?.activeActivity) {
@@ -491,21 +543,31 @@ export class FallbackParser implements IntentParser {
     ) {
       operation = 'deactivate';
     } else if (
-      normalized.includes('going to') ||
-      normalized.includes('start') ||
-      normalized.includes('activate') ||
-      normalized.includes('focus for') ||
-      normalized.includes('keep this mode on')
-    ) {
-      operation = 'activate';
-    } else if (
       normalized.includes('change') ||
       normalized.includes('modify') ||
       normalized.includes('set') ||
+      normalized.includes('move ') ||
+      normalized.includes('cancel') ||
+      normalized.includes('turn off alarm') ||
+      normalized.includes('turn off the alarm') ||
+      normalized.includes('disable alarm') ||
       normalized.includes('forget that') ||
       normalized.includes('forget this')
     ) {
       operation = 'modify';
+    } else if (
+      normalized.includes('going to') ||
+      normalized.includes('start') ||
+      normalized.includes('activate') ||
+      normalized.includes('focus for') ||
+      normalized.includes('keep this mode on') ||
+      normalized.includes('sleeping now') ||
+      normalized.includes('off to bed') ||
+      normalized.startsWith('wake me') ||
+      normalized.includes('wake me at') ||
+      normalized.includes('wake me up')
+    ) {
+      operation = 'activate';
     } else if (
       normalized.includes("actually, don't let") ||
       normalized.includes('actually, dont let') ||
