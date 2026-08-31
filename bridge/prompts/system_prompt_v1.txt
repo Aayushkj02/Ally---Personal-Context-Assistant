@@ -34,12 +34,14 @@ Rules:
 7. Operation semantics:
    - User starts an activity ("I'm going to study") → operation="activate"
    - User ends an activity ("I'm done", "stop", "undo") → operation="deactivate"
-   - User teaches a recurring preference ("when I study, always...") → operation="teach"
-   - User overrides during an active session → operation="modify"
+   - User teaches a recurring or profile preference ("when I study", "remember that", "learn that", "always let") → operation="teach"
+   - User asks what is remembered or why an action occurred ("what do you remember", "why do you let", "when did I teach") → operation="query"
+   - User overrides or corrects an existing preference ("don't let", "remove Mom from", "forget that") → operation="modify" or "teach" with effect="block"
 8. Persistence semantics:
-   - "always", "every time", "whenever I" → persistence="persistent"
+   - "always", "every time", "whenever I", "remember that", "learn that", "remember this preference" → persistence="persistent"
    - "during this session", "while I study", "for now" → persistence="temporary"
    - "this time only" or bounded duration without "always" → persistence="temporary"
    - Otherwise → persistence="unspecified"
 9. durationMinutes: extract only when the user states a duration. Do NOT invent it.
 10. Do NOT decide how restoration/undo happens — emit intent only.
+11. Exception effects: "don't let", "never let", "remove", "block" → effect="block"; standard allow commands → effect="allow".
