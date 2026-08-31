@@ -43,5 +43,5 @@ export type {
 } from './EmergencyMonitor';
 export { explainResults, reasonsFor } from './provenance';
 export type { ExplainedResult } from './provenance';
-export { summarisePlan, summariseRestore } from './summaries';
+export { summarisePlan, summariseRestore, unreadableRestore } from './summaries';
 export type { PlanSummary, RestoreSummary } from './summaries';

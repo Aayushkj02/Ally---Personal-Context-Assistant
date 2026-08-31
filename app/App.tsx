@@ -126,6 +126,7 @@ export default function App() {
   const [priority, setPriority] = useState<ChannelEnforcement[] | null>(null);
   const [emergency, setEmergency] = useState<EmergencyStatus | null>(null);
   const [busy, setBusy] = useState(false);
+  const [endError, setEndError] = useState<string | null>(null);
 
   /** Re-reads whatever context is genuinely running. The DB is the source of truth. */
   const refreshContext = useCallback(async () => {
@@ -174,6 +175,7 @@ export default function App() {
         state={state}
         results={results}
         reasons={reasons}
+        endError={endError}
         priority={priority}
         emergency={emergency}
         busy={busy}
@@ -200,6 +202,10 @@ export default function App() {
             setState(r.state);
             setPriority(null);
             setEmergency(null);
+            // A restore that could not even be attempted has no rows to explain it, so the
+            // message is the only thing the user has to go on. Seen on device: expo-sqlite
+            // rejected and the phone stayed dimmed with nothing but a red toast.
+            setEndError(r.error);
             await refreshContext();
             // A clean restore means no context is running any more; leave the screen so the
             // user is not looking at something that no longer exists.

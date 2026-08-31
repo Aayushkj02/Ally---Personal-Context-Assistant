@@ -36,6 +36,7 @@ import {
   __setMockPermission,
   __setMockBrightnessRaw,
   __getMockBrightnessRaw,
+  __getMockBrightnessPercent,
   __setMockUserDnd,
   __getMockAllyRuleActive,
   __getMockState,
@@ -323,6 +324,40 @@ describe('A3.5 — end is safe from any state', () => {
     // be safe — so ending writes the same value back. That is a no-op, not a change.
     expect(end.state).toBe('IDLE');
     expect(__getMockState().dnd).toBe(before);
+  });
+
+  it('an unreadable snapshot store is PARTIAL and retryable, never a clean end', async () => {
+    // Observed on the SM-S928B during Phase 4: expo-sqlite rejected with a NullPointerException,
+    // the rejection escaped endContext(), and the app showed a red toast while the phone stayed
+    // dimmed and silent. A store we cannot read is the opposite of a store with nothing in it.
+    __setMockBrightnessRaw(187);
+    const real = createInMemorySnapshotStore();
+    await startContext(plan([brightnessAction(40)]), deps(real));
+
+    const unreadable: SnapshotStore = {
+      save: real.save,
+      forSession: async () => {
+        throw new Error('NullPointerException');
+      },
+      clear: real.clear,
+    };
+
+    const end = await endContext(SESSION, deps(unreadable));
+
+    expect(end.state).toBe('PARTIAL');
+    expect(end.state).not.toBe('IDLE');
+    expect(end.cleared).toBe(false);
+    expect(end.retryable).toBe(true);
+    expect(end.error).toMatch(/could not read/i);
+    // The device is untouched by the failure, and the rows are still there.
+    expect(__getMockBrightnessPercent()).toBe(40);
+    expect(await real.forSession(SESSION)).toHaveLength(1);
+
+    // Which is the whole point: ending again finishes the job.
+    const retry = await endContext(SESSION, deps(real));
+    expect(retry.state).toBe('IDLE');
+    expect(retry.error).toBeNull();
+    expect(__getMockBrightnessRaw()).toBe(187);
   });
 
   it('ending a session that never started is IDLE, not a failure', async () => {

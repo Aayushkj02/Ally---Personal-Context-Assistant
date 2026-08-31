@@ -36,6 +36,7 @@ import type { SnapshotStore } from './SnapshotStore';
 import {
   summarisePlan,
   summariseRestore,
+  unreadableRestore,
   type PlanSummary,
   type RestoreSummary,
 } from './summaries';
@@ -146,6 +147,12 @@ export interface EndContextResult {
   cleared: boolean;
   /** Retained rows mean the caller may call endContext() again to finish the job. */
   retryable: boolean;
+  /**
+   * Plain language for a restore that could not be ATTEMPTED — the snapshots themselves were
+   * unreadable. Null on every other outcome, including a restore that ran and failed, which is
+   * described per row in `results` instead.
+   */
+  error: string | null;
 }
 
 /** A hook must never be able to turn a real device outcome into a thrown error. */
@@ -241,12 +248,37 @@ export async function endContext(
 ): Promise<EndContextResult> {
   const { registry, snapshots, hooks, onProgress } = deps;
 
-  const results = await restoreSession(sessionId, {
-    registry,
-    snapshots,
-    onProgress,
-    policy: deps.policy,
-  });
+  // THE SNAPSHOT READ IS ITSELF FALLIBLE, and was observed failing on the Samsung: expo-sqlite
+  // rejected with a NullPointerException, the rejection escaped endContext(), and the app showed
+  // a red toast while the phone stayed dimmed and silent with no explanation and no way forward.
+  //
+  // A restore that cannot start is not a restore that found nothing. Reported as PARTIAL with the
+  // rows untouched, so the state is honest and ending again — including from a fresh process,
+  // which is what actually recovered it — still finishes the job.
+  let results: ActionResult[];
+  try {
+    results = await restoreSession(sessionId, {
+      registry,
+      snapshots,
+      onProgress,
+      policy: deps.policy,
+    });
+  } catch (e) {
+    const summary = unreadableRestore();
+    await fire(hooks?.onPartial, () => hooks?.onPartial?.(sessionId, []));
+    return {
+      sessionId,
+      state: summary.state,
+      results: [],
+      summary,
+      cleared: false,
+      retryable: true,
+      error:
+        e instanceof Error
+          ? `Ally could not read what it needs to put your phone back: ${e.message}`
+          : 'Ally could not read what it needs to put your phone back.',
+    };
+  }
   const summary = summariseRestore(results);
   const state: ContextState = summary.state;
 
@@ -268,6 +300,7 @@ export async function endContext(
     summary,
     cleared,
     retryable: !summary.safeToClear,
+    error: null,
   };
 }
 

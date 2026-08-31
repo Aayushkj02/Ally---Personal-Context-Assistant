@@ -56,6 +56,12 @@ export interface ActiveContextScreenProps {
   reasons?: readonly (string | null)[];
   priority: ChannelEnforcement[] | null;
   emergency: EmergencyStatus | null;
+  /**
+   * Set when ending could not even be attempted — the snapshots were unreadable. There are no
+   * result rows in that case, so this sentence is all the user has, and saying nothing would
+   * leave them looking at a phone Ally is still holding.
+   */
+  endError?: string | null;
   busy?: boolean;
   onEnd: () => void;
   onCheckEmergency: () => void;
@@ -79,6 +85,7 @@ export default function ActiveContextScreen({
   reasons,
   priority,
   emergency,
+  endError = null,
   busy = false,
   onEnd,
   onCheckEmergency,
@@ -190,6 +197,15 @@ export default function ActiveContextScreen({
         </Pressable>
       </View>
 
+      {endError ? (
+        <View style={s.errorCard}>
+          <Text style={s.errorText}>{endError}</Text>
+          <Text style={s.rowMessage}>
+            Nothing was lost. Try ending again — reopening Ally first is what has fixed this before.
+          </Text>
+        </View>
+      ) : null}
+
       <Pressable style={[s.end, busy && s.endBusy]} onPress={onEnd} disabled={busy}>
         <Text style={s.endText}>{busy ? 'Putting your phone back…' : `End ${label}`}</Text>
       </Pressable>
@@ -250,6 +266,16 @@ const s = StyleSheet.create({
     alignItems: 'center',
   },
   endBusy: { backgroundColor: colors.neutral },
+  errorCard: {
+    marginTop: spacing.md,
+    gap: spacing.xs,
+    backgroundColor: colors.surface,
+    borderRadius: radius.lg,
+    padding: spacing.lg,
+    borderWidth: 1,
+    borderColor: colors.danger,
+  },
+  errorText: { ...typography.presets.bodyMedium, color: colors.danger },
   endText: {
     color: colors.textInverse,
     fontWeight: typography.weight.bold,

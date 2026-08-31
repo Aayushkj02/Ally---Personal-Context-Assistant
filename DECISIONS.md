@@ -921,3 +921,32 @@ Because entries never move and IDs never collide, a merge conflict here is alway
 - **Impact:** Restoring is now driven by "what was borrowed" from two stores rather than one, and
   the seam is explicit rather than a side effect of DND happening to be in the plan. A caller that
   wires no port still gets correct snapshot-driven restoration.
+
+### ADR-126 — Provenance is preserved by pairing, not by widening `ActionResult`
+- **Date:** 2026-08-31 · **Author:** Aayush · **Phase:** 4 · **Status:** Accepted
+- **Decision:** `explainResults(plan, results)` pairs each `ActionResult` with the `reason` its
+  `PlannedAction` carried, positionally. `startContext()` returns it as `explained`, and the Active
+  Context screen renders it beneath each row. `ActionResult` is untouched, nothing is persisted,
+  and no sentence is composed here — Dhrey's is copied verbatim.
+- **Reason:** Dhrey's resolver already answers "where did this value come from": `ResolvedEntry`
+  carries a `source` of command / override / profile / default and a plain-language `reason`, and
+  `buildActionPlan()` copies that sentence onto every action. Then it stopped. `ActionResult` has
+  no field for it, so the moment the executor turned a planned action into an outcome the
+  provenance was gone, and the screen could say what changed but never why. That is the one
+  question Ally exists to answer: a phone that dims is a setting; a phone that dims AND can say it
+  did so because you taught it to is the product. The pairing lives in the coordinator because that
+  is the only place holding both the plan and the outcomes — a caller asked to keep the plan alive
+  itself would eventually forget, and the failure mode is silent.
+- **Alternatives considered:** Add `reason` to `ActionResult` — the honest modelling, and a change
+  to a frozen contract that all three of us own; it also puts a display string into the row the
+  executor returns, which is a different kind of thing from a status. Match by `capability` instead
+  of position — looks safer, is worse: a plan may legitimately name the same capability twice and
+  the first match would be attributed to both rows. Re-read the preference in the UI to explain a
+  result — a second source of truth for what drove the device, and one that could disagree with
+  what actually ran.
+- **Impact:** Positional pairing depends on a guarantee `executePlan()` already makes and documents
+  — one `ActionResult` per `PlannedAction`, in the same order. Extra results are kept with a null
+  reason rather than dropped, so the policy row `restoreSession()` can append with no plan behind
+  it (ADR-125) still reaches the screen. Reasons are cleared on a restore: a restore is driven by
+  snapshots rather than a plan, so there is nothing to explain, and leaving the apply's reasons in
+  place would caption "Restored" rows with why they were changed in the first place.
