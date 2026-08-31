@@ -232,7 +232,23 @@ Because entries never move and IDs never collide, a merge conflict here is alway
 - **Impact:** Dhrey's memory layer receives unambiguous `teach`, `query`, and `modify` intents with full channel
   and exception scoping. The provenance chain is 100% faithful to the user's spoken words.
 
+### ADR-205 — Sleep, alarm scheduling, and recurrence intent representation
+- **Date:** 2026-08-31 · **Author:** Shlok · **Phase:** 5 · **Status:** Accepted
+- **Decision:** Sleep mode commands ("I'm going to sleep", "Start sleep mode", "Going to bed") map to
+  `activity: 'sleep'`. Wake-up times ("Wake me at 7 AM", "6:30 tomorrow", "alarm to 8") are extracted into
+  normalized 24-hour HH:MM format across `schedule` (`IntentSchedule`) and `requestedChanges` (`capability: 'alarm'`).
+  Recurrence is set to `weekdays` only when explicitly requested (e.g. "on weekdays"); otherwise it defaults to
+  `once` (or `none` on alarm cancellation). AI code never invokes native Android alarm APIs directly.
+- **Reason:** Keeps the boundary clean: AI produces structured `schedule` and `requestedChanges` alarms; Dhrey's
+  policy engine creates the `ActionPlan`; Aayush's native layer creates the real Clock app alarm. Never inventing
+  recurrence protects against unwanted recurring alarms on the user's phone.
+- **Alternatives considered:** Call Android AlarmManager directly from AI parser — rejected; violates contract
+  boundaries (Aayush owns Android device capabilities).
+- **Impact:** All Phase 5 sleep entry-points, wake-up times, weekday recurrence rules, alarm adjustments, and
+  cancellations are validated and structured deterministically across both fallback and Ollama parsers.
+
 ---
+
 
 
 ## ADR-1xx — Aayush (device, native, actions)
