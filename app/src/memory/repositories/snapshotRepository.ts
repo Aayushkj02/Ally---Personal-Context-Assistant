@@ -14,7 +14,13 @@ export const snapshotRepository = {
     const db = await getDatabase();
     await db.runAsync(
       'INSERT INTO device_snapshot (id, sessionId, capability, previousValue, capturedAt) VALUES (?, ?, ?, ?, ?)',
-      [snapshot.id, snapshot.sessionId, snapshot.capability, encodeValue(snapshot.previousValue), snapshot.capturedAt]
+      [
+        snapshot.id,
+        snapshot.sessionId,
+        snapshot.capability,
+        encodeValue(snapshot.previousValue),
+        snapshot.capturedAt,
+      ],
     );
   },
 
@@ -22,11 +28,11 @@ export const snapshotRepository = {
     const db = await getDatabase();
     const rows = await db.getAllAsync<any>(
       'SELECT * FROM device_snapshot WHERE sessionId = ? ORDER BY capturedAt ASC',
-      [sessionId]
+      [sessionId],
     );
-    return rows.map(row => ({
+    return rows.map((row) => ({
       ...row,
-      previousValue: decodeValue(row.previousValue)
+      previousValue: decodeValue(row.previousValue),
     }));
   },
 
@@ -38,5 +44,5 @@ export const snapshotRepository = {
   async cleanupSessionSnapshots(sessionId: string): Promise<void> {
     const db = await getDatabase();
     await db.runAsync('DELETE FROM device_snapshot WHERE sessionId = ?', [sessionId]);
-  }
+  },
 };

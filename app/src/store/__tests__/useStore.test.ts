@@ -54,7 +54,7 @@ describe('Ally D4 Runtime Store (Zustand)', () => {
   it('5. Processing/loading state can be changed (SessionState)', () => {
     useStore.getState().setSessionState('PARSING');
     expect(useStore.getState().sessionState).toBe('PARSING');
-    
+
     useStore.getState().setSessionState('APPLYING');
     expect(useStore.getState().sessionState).toBe('APPLYING');
   });
@@ -65,18 +65,20 @@ describe('Ally D4 Runtime Store (Zustand)', () => {
       actions: [],
       restoreOnEnd: true,
     };
-    
-    const mockResults: ActionResult[] = [{
-      capability: 'brightness',
-      status: 'applied',
-      beforeValue: null,
-      afterValue: 50,
-      message: 'Set brightness to 50'
-    }];
-    
+
+    const mockResults: ActionResult[] = [
+      {
+        capability: 'brightness',
+        status: 'applied',
+        beforeValue: null,
+        afterValue: 50,
+        message: 'Set brightness to 50',
+      },
+    ];
+
     useStore.getState().setLatestPlan(mockPlan);
     useStore.getState().setLatestResults(mockResults);
-    
+
     expect(useStore.getState().latestPlan).toEqual(mockPlan);
     expect(useStore.getState().latestResults).toEqual(mockResults);
   });
@@ -96,17 +98,17 @@ describe('Ally D4 Runtime Store (Zustand)', () => {
     // Setup some baseline contextual state
     useStore.getState().setActiveContext('prof_999', 'sess_999');
     useStore.getState().setTranscript('Do something');
-    
+
     // Act on an orthogonal piece of state
     useStore.getState().setError('Warning');
-    
+
     // Verify baseline state remains perfectly untouched
     const state = useStore.getState();
     expect(state.activeProfileId).toBe('prof_999');
     expect(state.activeSessionId).toBe('sess_999');
     expect(state.currentTranscript).toBe('Do something');
     expect(state.error).toBe('Warning');
-    
+
     // Verify `resetTransientState` accurately targets ONLY ephemeral artifacts
     useStore.getState().resetTransientState();
     const finalState = useStore.getState();
@@ -114,6 +116,6 @@ describe('Ally D4 Runtime Store (Zustand)', () => {
     expect(finalState.currentTranscript).toBeNull();
     // These pointers MUST remain intact across transient resets
     expect(finalState.activeProfileId).toBe('prof_999');
-    expect(finalState.activeSessionId).toBe('sess_999'); 
+    expect(finalState.activeSessionId).toBe('sess_999');
   });
 });
