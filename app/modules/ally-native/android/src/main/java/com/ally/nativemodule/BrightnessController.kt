@@ -40,8 +40,14 @@ object BrightnessController {
   /** The user's SCREEN_BRIGHTNESS_MODE from before Ally touched anything. */
   private const val KEY_MODE = "snap_mode"
   /**
-   * Set the moment anything is captured, cleared only when it has been given back. While it is
-   * present, Ally owes the user a brightness value and the remembered raw values are frozen.
+   * Open exactly while Ally has successfully changed the brightness and not yet put it back.
+   * While it is open, everything remembered below is frozen.
+   *
+   * OPENED BY A CONFIRMED WRITE, NOT BY A READ. It was originally set in snapshot(), which is
+   * wrong in both directions and was caught on device: the UI re-reads brightness to refresh its
+   * display right after a restore, so the flag re-armed the instant it had been cleared, and the
+   * NEXT session would then have refused to refresh a stale value — reintroducing ADR-110. A read
+   * borrows nothing. A write does.
    *
    * Deliberately its own key rather than reusing KEY_MODE as the flag: a device that cannot
    * report SCREEN_BRIGHTNESS_MODE would never set KEY_MODE, and the protection below would
@@ -82,6 +88,7 @@ object BrightnessController {
     val key = KEY_RAW_PREFIX + percent
     if (p.contains(KEY_BORROWED) && p.contains(key)) return
     p.edit().putInt(key, raw).commit()
+
   }
 
   private fun recallRaw(context: Context, percent: Int): Int? {
@@ -90,10 +97,20 @@ object BrightnessController {
     return if (p.contains(key)) p.getInt(key, -1).takeIf { it >= 0 } else null
   }
 
-  /** First write wins, and a successful restore clears it so the next context captures fresh. */
+  private fun isBorrowed(context: Context): Boolean = prefs(context).contains(KEY_BORROWED)
+
+  private fun openBorrow(context: Context) {
+    prefs(context).edit().putBoolean(KEY_BORROWED, true).commit()
+  }
+
+  /**
+   * Frozen while a borrow is open, refreshed otherwise — the same rule as rememberRaw, and for
+   * the same reason. Outside a borrow the newest reading is the truth; inside one, the newest
+   * reading is Ally's own doing.
+   */
   private fun rememberMode(context: Context, mode: Int) {
-    val p = prefs(context)
-    if (!p.contains(KEY_MODE)) p.edit().putInt(KEY_MODE, mode).commit()
+    if (isBorrowed(context)) return
+    prefs(context).edit().putInt(KEY_MODE, mode).commit()
   }
 
   private fun recallMode(context: Context): Int? {
@@ -131,12 +148,10 @@ object BrightnessController {
     val raw = readRaw(context)
       ?: return mapOf("ok" to false, "reason" to "unsupported", "percent" to null, "raw" to null)
     val percent = toPercent(raw)
-    // Order matters: remember the raw value while the borrow flag still reflects the PREVIOUS
-    // state, then open the borrow. A first capture must be free to overwrite a stale value from
-    // an older session; every reading after it must not.
+    // Reading opens nothing. Outside a borrow these refresh freely, so a stale value from an
+    // older session is replaced by what is true now; inside one they are ignored.
     rememberRaw(context, percent, raw)
     readMode(context)?.let { rememberMode(context, it) }
-    prefs(context).edit().putBoolean(KEY_BORROWED, true).commit()
     return mapOf(
       "ok" to true,
       "reason" to null,
@@ -146,8 +161,13 @@ object BrightnessController {
     )
   }
 
-  fun apply(context: Context, percent: Int): Map<String, Any?> =
-    write(context, percent, toRaw(percent), restoreMode = false)
+  fun apply(context: Context, percent: Int): Map<String, Any?> {
+    val out = write(context, percent, toRaw(percent), restoreMode = false)
+    // The borrow begins here, and only on a write we confirmed. A denied permission or a write
+    // the device did not hold borrows nothing, so it must not freeze anything either.
+    if (out["ok"] == true) openBorrow(context)
+    return out
+  }
 
   /**
    * Restores the user's brightness. When the target matches what we snapshotted we write the

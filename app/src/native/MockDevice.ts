@@ -124,7 +124,7 @@ const rawKey = (percent: number): string => `raw_${percent}`;
 const BORROWED = 'borrowed';
 
 /**
- * FIRST WRITE WINS WHILE A BORROW IS OPEN (ADR-124), last write wins otherwise — the same rule
+ * FROZEN WHILE A BORROW IS OPEN (ADR-124), refreshed otherwise — the same rule
  * BrightnessController.kt follows, and modelled here because the bug it prevents is reachable
  * without a phone: a blocked restore reads the current percent to fill in `beforeValue`, and if
  * that percent equals the snapshotted one (raw 186 and 187 both report 73%) an unconditional
@@ -474,10 +474,8 @@ const brightness: DeviceCapability = {
   /** Reading needs no permission. Returns the percent AND remembers the exact raw value. */
   async snapshot() {
     const percent = toPercent(state.brightnessRaw);
-    // Remember first, then open the borrow: a fresh capture may overwrite a stale value from an
-    // older session, every reading after it may not.
+    // Reading opens nothing. Outside a borrow this refreshes freely; inside one it is ignored.
     rememberRaw(percent, state.brightnessRaw);
-    prefs.set(BORROWED, 1);
     return percent;
   },
 
@@ -499,6 +497,11 @@ const brightness: DeviceCapability = {
         message: 'The setting did not take effect.',
       };
     }
+
+    // The borrow begins on a CONFIRMED WRITE, never on a read (ADR-124). Setting it in
+    // snapshot() re-armed it on the display refresh that follows a restore, which was caught on
+    // device: the flag came back the instant it had been cleared.
+    prefs.set(BORROWED, 1);
 
     return {
       capability: 'brightness',

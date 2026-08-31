@@ -194,6 +194,34 @@ describe('A3.4 — retry restores the original, never a value Ally caused', () =
     expect(await snapshots.forSession(SESSION)).toEqual(captured);
   });
 
+  it('the NEXT session captures fresh — a clean restore really does end the borrow', async () => {
+    // The flag that freezes the remembered value must be opened by a WRITE, not by a read. Set
+    // in snapshot(), it re-armed on the display refresh that follows a restore — caught on the
+    // Samsung — and this session would then have restored the value from the last one.
+    __setMockBrightnessRaw(187);
+    const first = createInMemorySnapshotStore();
+    await startContext(plan([brightnessAction(40)]), deps(first));
+    await endContext(SESSION, deps(first));
+    expect(__getMockBrightnessRaw()).toBe(187);
+
+    // The screen re-reads brightness to refresh its readout once the context has ended. This
+    // line is the whole test: on the Samsung it was this read that re-armed the flag, one moment
+    // after the restore cleared it.
+    await mockRegistry.get('brightness').snapshot();
+
+    // Between contexts the user nudges the slider. 186 still reports as 73% — the same key.
+    __setMockBrightnessRaw(186);
+
+    const second = createInMemorySnapshotStore();
+    await startContext(
+      { sessionId: 'session-2', actions: [brightnessAction(40)], restoreOnEnd: true },
+      deps(second),
+    );
+    await endContext('session-2', deps(second));
+
+    expect(__getMockBrightnessRaw()).toBe(186);
+  });
+
   it('a partial restore keeps every row, including the ones that already went back', async () => {
     __setMockBrightnessRaw(187);
     const snapshots = createInMemorySnapshotStore();
