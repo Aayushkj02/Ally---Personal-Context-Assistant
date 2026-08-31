@@ -820,3 +820,104 @@ Because entries never move and IDs never collide, a merge conflict here is alway
   UI copy says exactly that. Verified on device: with no inbound calls the screen reported "No
   caller has reached 4 calls in 10 minutes." The positive case needs a second handset and is NOT
   yet tested on hardware.
+
+### ADR-123 — Restore RELEASES Ally's zen rule; it does not re-assert the mode
+- **Date:** 2026-08-31 · **Author:** Aayush · **Phase:** 3 · **Status:** Accepted
+- **Decision:** `DndController.release(context, mode)` is the restore path for the interruption
+  filter. It deactivates Ally's own `AutomaticZenRule` first, reads the effective mode back, and
+  accepts the result if the device landed on the snapshotted value by itself — reporting
+  `rung: "zen_rule_released"`. Only when releasing is not enough does it fall through to the
+  existing `apply()` ladder, which reports its own rung, so a re-assert is never indistinguishable
+  from a clean release. `DndCapability.restore()` calls `dndRelease`, never `dndApply`.
+- **Reason:** Restore used to route through `apply(previousMode)`, and `apply` for any mode other
+  than `"off"` rebuilds our rule and sets it active. For a user whose Do Not Disturb was already
+  on before the context, every check passed: the read-back returned the mode they started in, the
+  restore reported `restored`, `summariseRestore` said IDLE and the snapshots were dropped as a
+  clean sweep. And their phone was now silent on ALLY'S authority rather than their own, with no
+  row left that would ever turn it off. Right value, wrong owner, permanently — a class of failure
+  a value-comparing read-back cannot see, because the value really is correct. Standing down first
+  is what makes the question answerable: if the mode survives our rule going away, it was never
+  ours.
+- **Alternatives considered:** Compare rule ownership after applying — Android exposes the
+  combination, not which rule won, so there is nothing to compare. Delete our rule on every
+  restore instead of deactivating it — re-adding it each session means running
+  `addAutomaticZenRule` repeatedly, which ADR-105 records as the call OEM builds reject, to remove
+  an inert disabled entry. Special-case `previous === "off"` — that is the one case that already
+  worked, and leaves the bug live for exactly the users who had DND on.
+- **Device finding that changed the fix.** `dumpsys notification` on the SM-S928B shows our
+  EXPLICIT `AutomaticZenRule` is not registered at all — rung 1 is rejected here, so rung 2
+  (`setInterruptionFilter`) does the work, and at targetSdk 35+ Android turns that into an
+  IMPLICIT rule of ours: `ZenRule[id=implicit_com.ally.assistant, name=Do Not Disturb (Ally)]`.
+  Releasing only the explicit rule would therefore have been a no-op on the exact phone we ship
+  on. `release()` stands down both, the implicit one via `setInterruptionFilter(ALL)`. Verified
+  on hardware that this does NOT cancel the user's own manual rule: with the user's DND on, the
+  call left `manualRule` at `STATE_TRUE` and `zen_mode` at 1 — it is scoped to our rule, which is
+  the point of the API 35 restriction.
+- **Impact:** A disabled "Ally" rule remains listed in the user's Do Not Disturb settings between
+  contexts. That is a visible artifact and is documented as one; it holds nothing. `MockDevice`
+  now models effective filter state separately from the user's underlying state, which is the only
+  way this failure is reachable in a test — with one field, a re-assert and a release look the
+  same.
+
+### ADR-124 — Remembered raw brightness is frozen while a borrow is open
+- **Date:** 2026-08-31 · **Author:** Aayush · **Phase:** 3 · **Status:** Accepted
+- **Decision:** `BrightnessController` freezes everything it remembers while `KEY_BORROWED` is
+  present and refreshes it freely otherwise. The borrow is OPENED BY A CONFIRMED `apply()` and
+  closed by a confirmed `restore()`. Separately, the borrowed `SCREEN_BRIGHTNESS_MODE` is now
+  released on any confirmed restore write rather than only an exact one.
+- **Reason:** `DeviceCapability.snapshot()` is called for two different reasons and only one of
+  them is a capture. The executor calls it to record the pre-change value; the capability calls it
+  again to fill in `beforeValue` on failure results, including the `permission_needed` row a
+  blocked restore returns — after Ally has already moved the screen. ADR-110 keyed the memory by
+  percent so a different percent could not clobber the original, but 186 and 187 both report as
+  73%, so a read taken during the context could still land on the same key and replace the user's
+  187 with Ally's 186. The retry after the permission was granted then restored the wrong value
+  and reported it as exact. Freezing during a borrow closes that without reintroducing ADR-110's
+  own bug: outside a borrow nothing is owed, so a genuine capture still overwrites a stale value
+  from a previous session. The mode fix is the same shape — `exact` describes the raw value, not
+  the mode, and gating on it left a mode owed forever after an inexact restore, which the NEXT
+  session would then hand back from the session before last.
+- **Alternatives considered:** A separate non-remembering read for failure paths — a second native
+  method and a second rule about which one to call, when the invariant is really about time, not
+  about the caller. Key by session — the controller does not know the session and should not.
+  First-write-wins unconditionally — restores a stale value from an older session, which is the
+  bug ADR-110 was fixing.
+- **Impact:** The borrow flag is deliberately its own key rather than reusing `KEY_MODE`: a device
+  that cannot report `SCREEN_BRIGHTNESS_MODE` never sets `KEY_MODE`, and the protection would have
+  switched itself off on exactly the phones we have not tested.
+- **Corrected on device, same day.** The flag was first opened in `snapshot()`, which is wrong in
+  both directions and was caught by reading `ally_brightness.xml` after a clean restore on the
+  SM-S928B: `borrowed=true` was back, one moment after the restore had cleared it, because the
+  screen re-reads brightness to refresh its readout. The next session would then have refused to
+  refresh a stale raw value — reintroducing ADR-110 through the fix for ADR-116. A read borrows
+  nothing; a write does. The regression test for this had to include that refresh read to
+  reproduce it at all, which is worth remembering: the first version of the test passed against
+  the bug.
+
+### ADR-125 — The borrowed notification policy is restored through a port, not a snapshot row
+- **Date:** 2026-08-31 · **Author:** Aayush · **Phase:** 3 · **Status:** Accepted
+- **Decision:** `restoreSession()` takes an optional `BorrowedPolicy` port (`hasSaved()` /
+  `restore()`) and consults it after the snapshot walk, ONLY when the session captured no `dnd`
+  row. The outcome is reported as an `ActionResult` on `dnd` so it is counted by
+  `summariseRestore()`. `src/native/index.ts` selects the native or mock implementation beside the
+  registry.
+- **Reason:** Priority is applied outside the ActionPlan — the coordinator calls an injected thunk
+  after the actions (ADR-119) — and it rewrites `NotificationManager.Policy` whether or not `dnd`
+  was ever planned. Restore is snapshot-driven by design (ADR-117), so a context of "dim the screen
+  and let Mom through" borrowed the policy with nothing to walk, gave it back never, and reported
+  IDLE, because every row it knew about did go back. The policy cannot travel AS a `DeviceSnapshot`:
+  that row is keyed by `Capability`, and `CAPABILITIES` is frozen with no member for it. Widening
+  the frozen contract for this is not a call one person makes, and a second snapshot table would be
+  the duplicate persistence the architecture exists to avoid — so the value stays in the durable
+  store `DndController` already owns, under the same rules (first-write-wins capture, cleared only
+  on a confirmed read-back, retained on failure). Same contract, different drawer. It is reported
+  as a row rather than done quietly because an unrestored policy must make the summary PARTIAL and
+  keep the session retryable, and that only happens if it is counted.
+- **Alternatives considered:** Add `notification_policy` to `CAPABILITIES` — the honest modelling,
+  and a frozen-contract change requiring all three of us; proposed for Phase 4 rather than taken
+  unilaterally. Always call the port, even with a `dnd` row — produces a duplicate row and a second
+  retry path for the same value. Have the coordinator restore it directly — the coordinator
+  composes, it does not reach for devices (ADR-115/118).
+- **Impact:** Restoring is now driven by "what was borrowed" from two stores rather than one, and
+  the seam is explicit rather than a side effect of DND happening to be in the plan. A caller that
+  wires no port still gets correct snapshot-driven restoration.
