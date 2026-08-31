@@ -18,9 +18,7 @@ export async function runMigrations(db: SQLite.SQLiteDatabase): Promise<void> {
     );
   `);
 
-  const appliedMigrations = await db.getAllAsync<{ name: string }>(
-    'SELECT name FROM migrations'
-  );
+  const appliedMigrations = await db.getAllAsync<{ name: string }>('SELECT name FROM migrations');
   const appliedNames = new Set(appliedMigrations.map((m) => m.name));
 
   const migrations = [
@@ -32,10 +30,10 @@ export async function runMigrations(db: SQLite.SQLiteDatabase): Promise<void> {
     if (!appliedNames.has(migration.name)) {
       console.log(`Applying migration: ${migration.name}`);
       await migration.up(db);
-      await db.runAsync(
-        'INSERT INTO migrations (name, executedAt) VALUES (?, ?)',
-        [migration.name, Date.now()]
-      );
+      await db.runAsync('INSERT INTO migrations (name, executedAt) VALUES (?, ?)', [
+        migration.name,
+        Date.now(),
+      ]);
     }
   }
 }

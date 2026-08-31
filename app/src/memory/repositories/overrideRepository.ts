@@ -26,22 +26,19 @@ export const overrideRepository = {
         override.startAt,
         override.expiresAt,
         override.active ? 1 : 0,
-        override.sourceCommand
-      ]
+        override.sourceCommand,
+      ],
     );
   },
 
   async getById(id: string): Promise<TemporaryOverride | null> {
     const db = await getDatabase();
-    const row = await db.getFirstAsync<any>(
-      'SELECT * FROM temporary_override WHERE id = ?',
-      [id]
-    );
+    const row = await db.getFirstAsync<any>('SELECT * FROM temporary_override WHERE id = ?', [id]);
     if (!row) return null;
     return {
       ...row,
       value: decodeValue(row.value),
-      active: row.active === 1
+      active: row.active === 1,
     };
   },
 
@@ -51,12 +48,12 @@ export const overrideRepository = {
     const rows = await db.getAllAsync<any>(
       `SELECT * FROM temporary_override 
        WHERE profileId = ? AND active = 1 AND expiresAt > ?`,
-      [profileId, now]
+      [profileId, now],
     );
-    return rows.map(row => ({
+    return rows.map((row) => ({
       ...row,
       value: decodeValue(row.value),
-      active: row.active === 1
+      active: row.active === 1,
     }));
   },
 
@@ -65,12 +62,12 @@ export const overrideRepository = {
     const now = Date.now();
     const rows = await db.getAllAsync<any>(
       'SELECT * FROM temporary_override WHERE active = 1 AND expiresAt <= ?',
-      [now]
+      [now],
     );
-    return rows.map(row => ({
+    return rows.map((row) => ({
       ...row,
       value: decodeValue(row.value),
-      active: row.active === 1
+      active: row.active === 1,
     }));
   },
 
@@ -82,5 +79,5 @@ export const overrideRepository = {
   async delete(id: string): Promise<void> {
     const db = await getDatabase();
     await db.runAsync('DELETE FROM temporary_override WHERE id = ?', [id]);
-  }
+  },
 };

@@ -1,15 +1,21 @@
 import { getDatabase } from '../../database';
-import { 
-  profileRepository, 
-  sessionRepository, 
-  overrideRepository, 
-  snapshotRepository, 
-  commandRepository, 
-  permissionRepository 
+import {
+  profileRepository,
+  sessionRepository,
+  overrideRepository,
+  snapshotRepository,
+  commandRepository,
+  permissionRepository,
 } from '../index';
-import type { 
-  ContextProfile, Preference, TemporaryOverride, ContextSession, 
-  DeviceSnapshot, CommandLog, ActionExecution, PermissionState 
+import type {
+  ContextProfile,
+  Preference,
+  TemporaryOverride,
+  ContextSession,
+  DeviceSnapshot,
+  CommandLog,
+  ActionExecution,
+  PermissionState,
 } from '../../../types';
 
 describe('Ally Phase 1 D1 Database and Repositories', () => {
@@ -51,7 +57,7 @@ describe('Ally Phase 1 D1 Database and Repositories', () => {
     it('3. Update the profile', async () => {
       const profile = await profileRepository.getProfileById(PROFILE_ID);
       expect(profile).toBeDefined();
-      
+
       profile!.name = 'Deep Study';
       profile!.updatedAt = Date.now();
       await profileRepository.updateProfile(profile!);
@@ -123,7 +129,7 @@ describe('Ally Phase 1 D1 Database and Repositories', () => {
         active: true,
         sourceCommand: 'Turn on DND for 10 mins',
       };
-      
+
       await overrideRepository.create(override);
 
       const activeOverrides = await overrideRepository.getActiveForProfile(PROFILE_ID);
@@ -133,7 +139,7 @@ describe('Ally Phase 1 D1 Database and Repositories', () => {
 
       // 14. Verify it does not mutate the persistent preference
       const prefs = await profileRepository.getPreferencesByProfile(PROFILE_ID);
-      expect(prefs.find(p => p.id === 'pref_persistent')?.value).toBe('off');
+      expect(prefs.find((p) => p.id === 'pref_persistent')?.value).toBe('off');
     });
 
     it('13. Verify an expired override is not treated as active', async () => {
@@ -155,11 +161,11 @@ describe('Ally Phase 1 D1 Database and Repositories', () => {
       const activeOverrides = await overrideRepository.getActiveForProfile(PROFILE_ID);
       // Should still only find the unexpired one from the previous test
       expect(activeOverrides.length).toBe(1);
-      expect(activeOverrides.find(o => o.id === 'over_expired')).toBeUndefined();
+      expect(activeOverrides.find((o) => o.id === 'over_expired')).toBeUndefined();
 
       // Ensure identifyExpired finds it
       const expiredList = await overrideRepository.identifyExpired();
-      expect(expiredList.find(o => o.id === 'over_expired')).toBeDefined();
+      expect(expiredList.find((o) => o.id === 'over_expired')).toBeDefined();
     });
   });
 

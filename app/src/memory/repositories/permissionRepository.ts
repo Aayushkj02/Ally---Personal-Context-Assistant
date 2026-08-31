@@ -10,20 +10,17 @@ export const permissionRepository = {
        ON CONFLICT(key) DO UPDATE SET 
        granted = excluded.granted, 
        checkedAt = excluded.checkedAt`,
-      [state.key, state.granted ? 1 : 0, state.checkedAt]
+      [state.key, state.granted ? 1 : 0, state.checkedAt],
     );
   },
 
   async getByKey(key: string): Promise<PermissionState | null> {
     const db = await getDatabase();
-    const row = await db.getFirstAsync<any>(
-      'SELECT * FROM permission_state WHERE key = ?',
-      [key]
-    );
+    const row = await db.getFirstAsync<any>('SELECT * FROM permission_state WHERE key = ?', [key]);
     if (!row) return null;
     return {
       ...row,
-      granted: row.granted === 1
+      granted: row.granted === 1,
     };
-  }
+  },
 };

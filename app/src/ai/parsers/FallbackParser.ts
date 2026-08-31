@@ -414,14 +414,21 @@ export class FallbackParser implements IntentParser {
       normalized.includes('deactivate') ||
       normalized.includes('finished') ||
       normalized.includes('undo') ||
+      normalized.includes('restore') ||
       normalized.includes('end study') ||
-      normalized.includes('end sleep')
+      normalized.includes('end sleep') ||
+      normalized.includes('end this session') ||
+      normalized.includes('end this') ||
+      normalized.includes('turn off this mode') ||
+      normalized.includes('turn off this')
     ) {
       operation = 'deactivate';
     } else if (
       normalized.includes('going to') ||
       normalized.includes('start') ||
-      normalized.includes('activate')
+      normalized.includes('activate') ||
+      normalized.includes('focus for') ||
+      normalized.includes('keep this mode on')
     ) {
       operation = 'activate';
     } else if (

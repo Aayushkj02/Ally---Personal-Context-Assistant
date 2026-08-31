@@ -8,7 +8,11 @@ import { getActiveOverrides, resolveCapability } from '../rules';
 /**
  * Resolves contact/subject exceptions from the current intent and active overrides.
  */
-function resolveExceptions(intent: Intent, activeOverrides: TemporaryOverride[], now: number): ResolvedException[] {
+function resolveExceptions(
+  intent: Intent,
+  activeOverrides: TemporaryOverride[],
+  now: number,
+): ResolvedException[] {
   const exceptions: ResolvedException[] = [];
 
   // Add intent exceptions (highest precedence implicitly because they are current)
@@ -17,7 +21,7 @@ function resolveExceptions(intent: Intent, activeOverrides: TemporaryOverride[],
       subject: exc.value,
       effect: exc.effect,
       expiresAt: exc.durationMinutes ? now + exc.durationMinutes * 60000 : null,
-      source: 'command'
+      source: 'command',
     });
   }
 
@@ -25,12 +29,12 @@ function resolveExceptions(intent: Intent, activeOverrides: TemporaryOverride[],
   for (const override of activeOverrides) {
     if (override.subject) {
       // Avoid adding if the intent already handled this exact subject
-      if (!exceptions.some(e => e.subject.toLowerCase() === override.subject!.toLowerCase())) {
+      if (!exceptions.some((e) => e.subject.toLowerCase() === override.subject!.toLowerCase())) {
         exceptions.push({
           subject: override.subject,
           effect: override.effect,
           expiresAt: override.expiresAt,
-          source: 'override'
+          source: 'override',
         });
       }
     }
@@ -49,9 +53,8 @@ export function resolve(
   preferences: Preference[],
   overrides: TemporaryOverride[],
   modeDefaults: Record<Capability, CapabilityValue>,
-  now: number = Date.now()
+  now: number = Date.now(),
 ): ResolvedPolicy {
-  
   const activeOverrides = getActiveOverrides(overrides, profile ? profile.id : null, now);
   const entries: ResolvedEntry[] = [];
 
@@ -70,6 +73,6 @@ export function resolve(
     profileId: profile ? profile.id : 'default',
     durationMinutes: intent.durationMinutes,
     entries,
-    exceptions
+    exceptions,
   };
 }

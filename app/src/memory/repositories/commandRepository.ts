@@ -14,7 +14,7 @@ export const commandRepository = {
     const db = await getDatabase();
     await db.runAsync(
       'INSERT INTO command_log (id, rawText, intentJson, confidence, source, createdAt) VALUES (?, ?, ?, ?, ?, ?)',
-      [log.id, log.rawText, log.intentJson, log.confidence, log.source, log.createdAt]
+      [log.id, log.rawText, log.intentJson, log.confidence, log.source, log.createdAt],
     );
   },
 
@@ -22,7 +22,7 @@ export const commandRepository = {
     const db = await getDatabase();
     return await db.getAllAsync<CommandLog>(
       'SELECT * FROM command_log ORDER BY createdAt DESC LIMIT ?',
-      [limit]
+      [limit],
     );
   },
 
@@ -37,21 +37,20 @@ export const commandRepository = {
         action.status,
         action.reason,
         encodeValue(action.beforeValue),
-        encodeValue(action.afterValue)
-      ]
+        encodeValue(action.afterValue),
+      ],
     );
   },
 
   async getActionsByCommand(commandId: string): Promise<ActionExecution[]> {
     const db = await getDatabase();
-    const rows = await db.getAllAsync<any>(
-      'SELECT * FROM action_execution WHERE commandId = ?',
-      [commandId]
-    );
-    return rows.map(row => ({
+    const rows = await db.getAllAsync<any>('SELECT * FROM action_execution WHERE commandId = ?', [
+      commandId,
+    ]);
+    return rows.map((row) => ({
       ...row,
       beforeValue: decodeValue(row.beforeValue),
-      afterValue: decodeValue(row.afterValue)
+      afterValue: decodeValue(row.afterValue),
     }));
-  }
+  },
 };

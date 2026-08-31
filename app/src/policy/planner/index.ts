@@ -16,23 +16,23 @@ const PERMISSION_MAP: Record<Capability, PermissionRequirement['key'] | null> = 
 export function buildActionPlan(
   sessionId: string,
   policy: ResolvedPolicy,
-  persistence: Persistence
+  persistence: Persistence,
 ): ActionPlan {
-  
   // We need to restore state if this is not a permanent change
-  const restoreOnEnd = persistence === 'session' || persistence === 'temporary' || persistence === 'unspecified';
+  const restoreOnEnd =
+    persistence === 'session' || persistence === 'temporary' || persistence === 'unspecified';
 
-  const actions: PlannedAction[] = policy.entries.map(entry => ({
+  const actions: PlannedAction[] = policy.entries.map((entry) => ({
     capability: entry.capability,
     value: entry.value,
     needsSnapshot: restoreOnEnd, // take snapshot so we can restore it later
     requiredPermission: PERMISSION_MAP[entry.capability],
-    reason: entry.reason
+    reason: entry.reason,
   }));
 
   return {
     sessionId,
     actions,
-    restoreOnEnd
+    restoreOnEnd,
   };
 }
