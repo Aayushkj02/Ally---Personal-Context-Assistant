@@ -264,6 +264,14 @@ chance.
 **One failure never aborts the walk.** A phone that refuses to put brightness back must still get
 its Do Not Disturb turned off.
 
+**DND gives back two things, not one** (ADR-120). The interruption filter is the visible half; the
+`NotificationManager.Policy` Ally rewrites to express "let Mom call me" is the other, and it is
+just as much borrowed state. `DndCapability.restore()` puts the policy back first, then the filter
+on top of it, and the policy goes back whenever one was saved — never conditional on which mode is
+being returned to, which is what used to strand a user who already had Do Not Disturb on. The
+saved copy lives in SharedPreferences with all five policy fields, so it survives the process, and
+is cleared only once a read-back confirms the restore.
+
 **The two sequences are one call each** (ADR-118). `startContext(plan, deps)` and
 `endContext(sessionId, deps)` in `ContextCoordinator.ts` compose `executePlan()` and
 `restoreSession()` — they re-implement neither, and own no policy, session table or persistence.

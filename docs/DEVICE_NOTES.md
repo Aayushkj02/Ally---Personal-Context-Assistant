@@ -546,3 +546,77 @@ That path depends on `DndController.savedPolicy`, which is still a **heap field*
 directly this session: a policy applied before an earlier process death was still on the device
 afterwards, with no saved copy left to restore it from. Same class as ADR-116, not yet fixed for
 the policy. A context whose process dies cannot put the user's notification policy back.
+
+---
+
+## ADR-120 — durable notification-policy restore (2026-08-31, SM-S928B, Android 16 / API 36)
+
+### Why the process-local `savedPolicy` was not enough
+
+Ally rewrites `NotificationManager.Policy` to express "let Mom call me", so the user's original
+is borrowed state. It was held in a field on the `DndController` Kotlin object — alive exactly as
+long as the process, and a context routinely outlives its process. The failure was silent rather
+than loud: `restorePolicy()` read `null` and did nothing, so the phone kept Ally's policy while
+every status still read green. Seen directly during A-V7, where a policy applied before an earlier
+process death was still on the device with no saved copy to restore from.
+
+### Why all five fields are preserved
+
+Ally writes the policy through the **3-argument** `Policy` constructor, which replaces
+`suppressedVisualEffects` and `priorityConversationSenders` with that constructor's defaults. Those
+two are borrowed whether Ally meant to touch them or not, so a three-field restore hands back a
+policy the user never had. Confirmed with `javap` against the API 36 `android.jar`: five public int
+fields, three constructors, the widest taking all five.
+
+The saved copy, read off the device mid-context:
+
+```xml
+<!-- shared_prefs/ally_dnd_policy.xml -->
+<int name="priorityCategories" value="60" />
+<int name="priorityCallSenders" value="2" />
+<int name="priorityMessageSenders" value="2" />
+<int name="suppressedVisualEffects" value="22" />
+<int name="priorityConversationSenders" value="3" />
+<boolean name="has_saved" value="true" />
+```
+
+### Why restoration is independent of the target mode
+
+The restore used to live inside the `mode == "off"` branch of `dndApply`. A user who already had
+Do Not Disturb on before the context got their mode back and silently kept Ally's policy — the one
+case where the user had most obviously configured DND themselves. Whether a saved policy exists is
+now the only condition.
+
+### Process-death results
+
+Both read with `adb shell dumpsys notification`, app force-stopped between apply and restore.
+
+**Case A — DND originally off**
+
+| Stage | zen | priorityCategories | sve | conv |
+|---|---|---|---|---|
+| Before | 0 | `ALARMS, MEDIA` | `SCREEN_ON,FSI,PEEK` | none |
+| Active | 1 | `ALARMS, REPEAT_CALLERS` | — | — |
+| force-stop (pid 1170 → 1875) | 1 | `ALARMS, REPEAT_CALLERS` | — | — |
+| **After restore** | **0** | **`ALARMS, MEDIA`** | **`SCREEN_ON,FSI,PEEK`** | **none** |
+
+**Case B — DND originally ON (`alarms_only`)** — the case the old condition failed
+
+| Stage | zen | priorityCategories | allowPriorityChannels |
+|---|---|---|---|
+| Before | 3 | `ALARMS, MEDIA` | false |
+| Active | 1 | `ALARMS, REPEAT_CALLERS` | true |
+| force-stop (pid 2881 → 6735) | 1 | `ALARMS, REPEAT_CALLERS` | true |
+| **After restore** | **3** | **`ALARMS, MEDIA`** | **false** |
+
+The mode came back to `alarms_only`, **not** `off`, and the policy came back with it. Under the old
+`mode == "off"` condition the policy restore would not have run at all here.
+
+In both cases `ally_dnd_policy.xml` was `<map />` afterwards — cleared only once a read-back
+confirmed the restore, so a failed restore keeps the original for a retry.
+
+### Incidental fix
+
+`describe()` was emitting Kotlin's escaped-dollar literal (`${'$'}{it.priorityCategories}`) rather
+than the value, so every previous policy log line was meaningless text. Debug output only, never
+behaviour. Fixed while adding the raw-int fields to `policySnapshot()`.
