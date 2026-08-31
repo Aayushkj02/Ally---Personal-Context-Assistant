@@ -22,6 +22,38 @@ const WORD_TO_NUMBER: Record<string, number> = {
   ninety: 90,
 };
 
+/**
+ * Detects persistence semantics from the user's phrasing.
+ *
+ * persistent  — "always", "every time", "whenever I" (profile-level preference)
+ * temporary   — "while I study/sleep", "during this session", "for now", "this time"
+ * unspecified — parser could not tell; policy engine falls back to `session`
+ *
+ * We deliberately do NOT invent a value — unspecified is a valid answer.
+ */
+function detectPersistence(text: string): Intent['persistence'] {
+  if (text.includes('always ') || text.includes('every time') || text.includes('whenever i')) {
+    return 'persistent';
+  }
+
+  if (
+    text.includes('while i study') ||
+    text.includes('while i sleep') ||
+    text.includes('while studying') ||
+    text.includes('while sleeping') ||
+    text.includes('during this session') ||
+    text.includes('during this study') ||
+    text.includes('during this sleep') ||
+    text.includes('for now') ||
+    text.includes('just this time') ||
+    text.includes('this time only')
+  ) {
+    return 'temporary';
+  }
+
+  return 'unspecified';
+}
+
 function extractDurationMinutes(text: string): number | null {
   // Numeric hours
   const numericHoursMatch = text.match(/(\d+(?:\.\d+)?)\s*(?:hours?|hrs?)/i);
@@ -403,10 +435,16 @@ export class FallbackParser implements IntentParser {
       normalized.includes('allow ') ||
       normalized.includes('through')
     ) {
-      // Exception / priority commands that don't match an explicit operation word
-      // are best modelled as a teach (persistent preference) when no session is active,
-      // or as a temporary override when a session is already active.
-      operation = ctx?.activeActivity ? 'modify' : 'teach';
+      // Exception / priority commands:
+      // – "while I study/sleep" → session-scoped temporary override (modify)
+      // – active session present → temporary override (modify)
+      // – no session context and no "while" phrasing → persistent preference (teach)
+      const isSessionScoped =
+        normalized.includes('while i') ||
+        normalized.includes('while studying') ||
+        normalized.includes('while sleeping') ||
+        normalized.includes('during this session');
+      operation = ctx?.activeActivity || isSessionScoped ? 'modify' : 'teach';
     }
 
     if (activity === 'unknown') {
@@ -423,6 +461,7 @@ export class FallbackParser implements IntentParser {
     const requestedChanges = extractRequestedChanges(normalized);
     const exceptions = extractExceptions(rawText, normalized);
     const confidence = calculateConfidence(activity, operation, normalized);
+    const persistence = detectPersistence(normalized);
 
     // WhatsApp exceptions are preference-only; surface that with requiresConfirmation.
     const hasWhatsApp = exceptions.some((e) => e.channel === 'whatsapp');
@@ -433,6 +472,7 @@ export class FallbackParser implements IntentParser {
       operation,
       durationMinutes,
       schedule,
+      persistence,
       requestedChanges,
       exceptions,
       rawText,
