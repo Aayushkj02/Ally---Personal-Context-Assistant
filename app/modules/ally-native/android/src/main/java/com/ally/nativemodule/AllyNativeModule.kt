@@ -111,6 +111,12 @@ class AllyNativeModule : Module() {
     /** Applies a mode and reports what the device ACTUALLY did, after a read-back. */
     Function("dndApply") { mode: String -> DndController.apply(context, mode) }
 
+    /**
+     * Restore path for the interruption filter. Stands Ally's own zen rule down first and only
+     * re-asserts the mode if the device did not land there by itself (ADR-123).
+     */
+    Function("dndRelease") { mode: String -> DndController.release(context, mode) }
+
     /** Diagnostics for the T3 spike and docs/DEVICE_NOTES.md. */
     Function("dndDebugState") { DndController.debugState(context) }
 

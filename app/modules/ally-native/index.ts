@@ -48,6 +48,12 @@ export interface AllyNativeSpec {
   dndIsAvailable(): boolean;
   dndGetMode(): string;
   dndApply(mode: string): NativeApplyResult;
+  /**
+   * The RESTORE counterpart to dndApply. Deactivates Ally's AutomaticZenRule and reports what
+   * the device settled on; falls back to the apply ladder only if releasing was not enough
+   * (ADR-123). `rung: "zen_rule_released"` means nothing of Ally's is left holding the filter.
+   */
+  dndRelease(mode: string): NativeApplyResult;
   dndDebugState(): Record<string, unknown>;
   /** Demo-device compatibility probe. Reverts everything it touches. */
   dndProbe(): Record<string, unknown>;

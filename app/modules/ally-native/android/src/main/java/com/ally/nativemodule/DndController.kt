@@ -451,6 +451,58 @@ object DndController {
     }
   }
 
+  /**
+   * Gives the interruption filter back by RELEASING Ally's rule, not by re-asserting a mode.
+   *
+   * WHY THIS IS NOT `apply(context, previousMode)` (ADR-123). Restore used to route through
+   * apply(), which for any mode other than "off" REBUILDS Ally's AutomaticZenRule and sets it
+   * active. For a user whose Do Not Disturb was already on before the context, that is a
+   * silent trap: the read-back says "priority", which is genuinely the mode they started in,
+   * so the restore reports success — but the phone is now in Do Not Disturb because of ALLY'S
+   * rule rather than the user's own, the snapshots are cleared as a clean restore, and nothing
+   * will ever turn it off again. Correct value, wrong owner, permanently.
+   *
+   * So: stand down first, then look. Deactivating our rule hands the filter back to whatever
+   * the user actually had running, and if the device lands on the snapshotted mode by itself
+   * we are done and Ally owns nothing. Only when it does NOT match do we fall through to the
+   * ladder — reporting the rung honestly, so "we had to re-assert it" is visible rather than
+   * indistinguishable from a clean release.
+   */
+  fun release(context: Context, mode: String): Map<String, Any?> {
+    if (!isAvailable(context)) {
+      return result(false, "unsupported", null, null, "Do Not Disturb control is not available on this device.", "none")
+    }
+
+    val manager = nm(context)
+    val before = toMode(manager.currentInterruptionFilter)
+
+    if (!manager.isNotificationPolicyAccessGranted) {
+      // Same rule as apply: a denied permission leaves the device untouched.
+      return result(false, "permission", before, before, "Do Not Disturb access is needed before Ally can change this.", "none")
+    }
+
+    val releaseError = try {
+      findOurRuleId(manager)?.let {
+        manager.setAutomaticZenRuleState(it, Condition(CONDITION_ID, "Ally inactive", Condition.STATE_FALSE))
+      }
+      null
+    } catch (t: Throwable) {
+      t.message ?: "zen rule release rejected"
+    }
+
+    if (releaseError == null) {
+      Thread.sleep(250)
+      val after = toMode(manager.currentInterruptionFilter)
+      if (after == mode) {
+        // The user's own state was underneath ours all along. Nothing of Ally's is left active.
+        return result(true, null, before, after, "Interruptions back to $mode.", "zen_rule_released")
+      }
+    }
+
+    // Releasing was not enough to reach the value the user had. Re-assert it and say so.
+    return apply(context, mode)
+  }
+
   /** Returns null on success, or a short failure reason. */
   private fun tryZenRule(context: Context, manager: NotificationManager, mode: String): String? {
     return try {

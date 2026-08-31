@@ -36,7 +36,20 @@ const toRaw = (percent: number): number => Math.round((percent * RAW_MAX) / 100)
  * 73%, and 73% converts back to 186. A mock that stored only the percent could never show that.
  */
 interface MockState {
+  /** The EFFECTIVE interruption filter — what the phone is actually doing right now. */
   dnd: DndMode;
+  /**
+   * What the filter falls back to when Ally's own rule stands down: the user's own schedules,
+   * their manual Do Not Disturb, whatever else they have running.
+   *
+   * Modelled separately from `dnd` because ADR-123 is invisible without it. On the real device
+   * Android combines every active rule, so "the filter reads priority" does not tell you WHOSE
+   * rule is holding it there — and a restore that re-asserts Ally's rule looks identical to one
+   * that released it. Splitting effective from underlying is what lets a test tell them apart.
+   */
+  userDnd: DndMode;
+  /** Whether Ally's AutomaticZenRule is the thing currently holding the filter. */
+  allyRuleActive: boolean;
   brightnessRaw: number;
   ringer: RingerMode;
   alarm: string | null;
@@ -48,6 +61,8 @@ const DEFAULT_RAW = 187;
 
 const state: MockState = {
   dnd: 'off',
+  userDnd: 'off',
+  allyRuleActive: false,
   brightnessRaw: DEFAULT_RAW,
   ringer: 'normal',
   alarm: null,
@@ -105,9 +120,20 @@ let livePolicy: MockPolicy = { ...DEFAULT_POLICY };
 let savedPolicy: MockPolicy | null = null;
 
 const rawKey = (percent: number): string => `raw_${percent}`;
+/** Mirrors BrightnessController's KEY_BORROWED: set on capture, cleared when it goes back. */
+const BORROWED = 'borrowed';
 
+/**
+ * FIRST WRITE WINS WHILE A BORROW IS OPEN (ADR-124), last write wins otherwise — the same rule
+ * BrightnessController.kt follows, and modelled here because the bug it prevents is reachable
+ * without a phone: a blocked restore reads the current percent to fill in `beforeValue`, and if
+ * that percent equals the snapshotted one (raw 186 and 187 both report 73%) an unconditional
+ * write replaces the user's value with Ally's.
+ */
 function rememberRaw(percent: number, raw: number): void {
-  prefs.set(rawKey(percent), raw);
+  const key = rawKey(percent);
+  if (prefs.has(BORROWED) && prefs.has(key)) return;
+  prefs.set(key, raw);
 }
 
 function recallRaw(percent: number): number | null {
@@ -128,6 +154,8 @@ export function __resetMockState(): void {
   livePolicy = { ...DEFAULT_POLICY };
   savedPolicy = null;
   state.dnd = 'off';
+  state.userDnd = 'off';
+  state.allyRuleActive = false;
   state.brightnessRaw = DEFAULT_RAW;
   state.ringer = 'normal';
   state.alarm = null;
@@ -153,6 +181,22 @@ export function __getMockBrightnessPercent(): number {
 /** Test hook: place the device at a specific raw value, as a real phone would already be. */
 export function __setMockBrightnessRaw(raw: number): void {
   state.brightnessRaw = raw;
+}
+
+/**
+ * Test hook: the user already had Do Not Disturb on, by their own rule, before Ally arrived.
+ *
+ * Sets both the underlying mode and the effective one, because that is the honest starting
+ * position — nothing of Ally's is active yet, so the two are the same thing.
+ */
+export function __setMockUserDnd(mode: DndMode): void {
+  state.userDnd = mode;
+  if (!state.allyRuleActive) state.dnd = mode;
+}
+
+/** Test hook: is Ally's own zen rule the thing holding the filter? (ADR-123) */
+export function __getMockAllyRuleActive(): boolean {
+  return state.allyRuleActive;
 }
 
 /**
@@ -325,6 +369,11 @@ const dndMode = makeCapability('dnd', 'dnd', 'notification_policy', (v) =>
   v === 'off' ? 'Interruptions back to normal.' : `Interruptions set to ${v}.`,
 );
 
+/** The effective filter is Ally's rule when it is holding, the user's own state otherwise. */
+function settleDnd(): void {
+  if (!state.allyRuleActive) state.dnd = state.userDnd;
+}
+
 /**
  * DND restores BOTH borrowed things, matching DndCapability on the real backend (ADR-007
  * parity): the notification policy first, then the interruption filter on top of it.
@@ -332,13 +381,80 @@ const dndMode = makeCapability('dnd', 'dnd', 'notification_policy', (v) =>
  * The policy goes back regardless of which mode is being returned to — that unconditional-ness
  * is the ADR-120 fix, and a mock that restored it only on `off` would let the bug back in
  * untested.
+ *
+ * The FILTER goes back by RELEASING Ally's rule, not by re-applying the snapshotted mode
+ * (ADR-123). Modelled here so the failure is reachable in Node: for a user who already had Do
+ * Not Disturb on, re-applying "priority" reads back as a perfect restore while leaving Ally's
+ * own rule the thing holding their phone silent, forever, with the snapshots cleared. Standing
+ * down first and only re-asserting if the device did not land there by itself is the difference,
+ * and `allyRuleActive` is how a test can see it.
  */
 const dnd: DeviceCapability = {
   ...dndMode,
-  async restore(previous) {
-    __restoreMockPolicy();
-    return dndMode.restore(previous);
+
+  async execute(value) {
+    if (!state.permissions.notification_policy) {
+      return blocked('dnd', 'notification_policy', state.dnd);
+    }
+    const before = state.dnd;
+    state.allyRuleActive = value !== 'off';
+    state.dnd = state.allyRuleActive ? (value as DndMode) : state.userDnd;
+
+    if (state.dnd !== value) {
+      return {
+        capability: 'dnd',
+        status: 'failed',
+        beforeValue: before,
+        afterValue: state.dnd,
+        message: 'The setting did not take effect.',
+      };
+    }
+    return {
+      capability: 'dnd',
+      status: 'applied',
+      beforeValue: before,
+      afterValue: state.dnd,
+      message: value === 'off' ? 'Interruptions back to normal.' : `Interruptions set to ${value}.`,
+    };
   },
+
+  async restore(previous) {
+    if (!state.permissions.notification_policy) {
+      return blocked('dnd', 'notification_policy', state.dnd);
+    }
+    __restoreMockPolicy();
+
+    const before = state.dnd;
+
+    // Stand down first, then look.
+    state.allyRuleActive = false;
+    settleDnd();
+
+    const released = state.dnd === previous;
+    if (!released) {
+      // Releasing was not enough to reach what the user had. Re-assert, and say which it was.
+      state.allyRuleActive = previous !== 'off';
+      state.dnd = previous as DndMode;
+    }
+
+    return {
+      capability: 'dnd',
+      status: 'restored',
+      beforeValue: before,
+      afterValue: state.dnd,
+      message: `Interruptions back to ${previous}. [${released ? 'zen_rule_released' : 'zen_rule'}]`,
+    };
+  },
+};
+
+/**
+ * The mock's borrowed-policy port (ADR-125), matching `createBorrowedPolicy()` on the real
+ * backend. Same two questions, same durable store — here that store is `savedPolicy`, which
+ * survives __simulateProcessDeath() for exactly the reason SharedPreferences does.
+ */
+export const mockBorrowedPolicy = {
+  hasSaved: () => savedPolicy !== null,
+  restore: () => __restoreMockPolicy(),
 };
 
 /**
@@ -358,7 +474,10 @@ const brightness: DeviceCapability = {
   /** Reading needs no permission. Returns the percent AND remembers the exact raw value. */
   async snapshot() {
     const percent = toPercent(state.brightnessRaw);
+    // Remember first, then open the borrow: a fresh capture may overwrite a stale value from an
+    // older session, every reading after it may not.
     rememberRaw(percent, state.brightnessRaw);
+    prefs.set(BORROWED, 1);
     return percent;
   },
 
@@ -402,6 +521,8 @@ const brightness: DeviceCapability = {
     const percent = Number(previous);
     const before = toPercent(state.brightnessRaw);
     state.brightnessRaw = recallRaw(percent) ?? toRaw(percent);
+    // The value is back, so the borrow is closed and fresh readings count again.
+    prefs.delete(BORROWED);
 
     return {
       capability: 'brightness',
