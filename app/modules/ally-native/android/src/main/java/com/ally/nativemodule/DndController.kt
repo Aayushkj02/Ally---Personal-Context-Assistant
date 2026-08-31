@@ -481,10 +481,19 @@ object DndController {
       return result(false, "permission", before, before, "Do Not Disturb access is needed before Ally can change this.", "none")
     }
 
+    // BOTH MECHANISMS ARE STOOD DOWN, because either one may be the one holding the filter.
+    // apply() walks a ladder: rung 1 is our own AutomaticZenRule, rung 2 is setInterruptionFilter.
+    // On SM-S928B rung 1 is rejected and rung 2 does the work — and at targetSdk 35+ Android turns
+    // that call into an IMPLICIT rule of ours (visible in dumpsys as `implicit_com.ally.assistant`,
+    // "Do Not Disturb (Ally)"). So releasing only the explicit rule would be a no-op on the exact
+    // device we ship on, and the phone would stay silent on Ally's implicit rule instead. Setting
+    // the filter back to ALL is what stands that one down; scoped to our own rule, not the user's,
+    // which is the whole point of the API 35 restriction.
     val releaseError = try {
       findOurRuleId(manager)?.let {
         manager.setAutomaticZenRuleState(it, Condition(CONDITION_ID, "Ally inactive", Condition.STATE_FALSE))
       }
+      manager.setInterruptionFilter(NotificationManager.INTERRUPTION_FILTER_ALL)
       null
     } catch (t: Throwable) {
       t.message ?: "zen rule release rejected"
@@ -494,7 +503,8 @@ object DndController {
       Thread.sleep(250)
       val after = toMode(manager.currentInterruptionFilter)
       if (after == mode) {
-        // The user's own state was underneath ours all along. Nothing of Ally's is left active.
+        // Whatever the user has running was underneath ours all along, or they had nothing and
+        // the phone is genuinely off. Either way nothing of Ally's is left holding the filter.
         return result(true, null, before, after, "Interruptions back to $mode.", "zen_rule_released")
       }
     }
