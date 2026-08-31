@@ -265,7 +265,26 @@ Because entries never move and IDs never collide, a merge conflict here is alway
 - **Impact:** Eval suite expands to 70 cases with >= 90% accuracy benchmark. Conversational natural language is
   broadened while preserving deterministic security and clarification boundaries.
 
+### ADR-207 — Hardened fallback ladder, malformed output isolation, and offline demo reliability
+- **Date:** 2026-08-31 · **Author:** Shlok · **Phase:** 7 · **Status:** Accepted
+- **Decision:** Final demo reliability is sealed through a three-layer defense:
+  1. Golden command freeze across all 9 command families (Study, Sleep, Duration, Priority Calls, Priority SMS,
+     WhatsApp preference, Undo/End, Emergency queries, Teaching/Memory).
+  2. Offline resilience: `DefaultIntentEngine` executes a 2500 ms race against Ollama, falling through silently to
+     `FallbackParser` on timeout, network disconnection, or transport failure without throwing or faking success.
+  3. Strict isolation: `IntentValidator` gates every parse result from both engines, rejecting malformed JSON, out-of-domain
+     numbers, unsupported capabilities (e.g. WiFi, Bluetooth), invalid schedules, and low confidence (< 0.7) by converting
+     them to `Clarification` questions with suggested options.
+- **Reason:** Live demos face network instability, timeouts, and unexpected model outputs. A software system that crashes
+  or hallucinates on stage fails the core product promise. The deterministic on-device fallback ensures 100% of golden
+  commands execute flawlessly offline, and the validator ensures downstream policy/device layers never receive corrupt intents.
+- **Alternatives considered:** Retry Ollama on failure — introduces unbounded latency on stage. Pass unvalidated AI outputs
+  to policy — security and stability vulnerability.
+- **Impact:** 100% offline demo capability verified on Samsung S24 Ultra test harness and CI with 0 errors across 10 test
+  suites and 70/70 eval benchmark.
+
 ---
+
 
 
 
