@@ -36,3 +36,10 @@ export {
 export type { RestoreHistoryEntry } from './restoreHistory';
 export { findReversibleContext, getRestorationTarget, findRestorationTarget } from './reversal';
 export type { RestorationTarget } from './reversal';
+export {
+  createTemporaryOverride,
+  listActiveOverrides,
+  listOverrideHistory,
+  deactivateOverride,
+} from './overrides';
+export type { CreateOverrideInput } from './overrides';

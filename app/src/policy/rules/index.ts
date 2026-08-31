@@ -24,21 +24,33 @@ export function validatePolicyInput(capability: Capability, value: CapabilityVal
 }
 
 /**
- * Filter out overrides that have already expired.
+ * Is this override in force at `now`?
+ *
+ * The single definition of "active", so policy and the repository cannot drift apart:
+ * started, not yet expired, not deactivated. The upper bound is EXCLUSIVE — an override
+ * expiring exactly at `now` is already over, which keeps "until 18:00" meaning
+ * up-to-but-not-including 18:00 rather than a value that lingers for one more tick.
  */
-export function getActiveOverrides(
-
-  overrides: TemporaryOverride[], 
-  profileId: string | null,
-  now: number = Date.now()
-): TemporaryOverride[] {
-  return overrides.filter(override => 
-    override.active && 
-    override.expiresAt > now &&
-    (profileId === null || override.profileId === profileId)
-  );
+export function isOverrideActive(override: TemporaryOverride, now: number): boolean {
+  return override.active && override.startAt <= now && override.expiresAt > now;
 }
 
+/**
+ * Filter out overrides that are not in force, optionally scoping to one profile.
+ *
+ * Evaluated at resolve time rather than by a background job, so the correct policy is
+ * computed even if the app was killed while an override was live (FLOW.md §4).
+ */
+export function getActiveOverrides(
+  overrides: TemporaryOverride[],
+  profileId: string | null,
+  now: number = Date.now(),
+): TemporaryOverride[] {
+  return overrides.filter(
+    (override) =>
+      isOverrideActive(override, now) && (profileId === null || override.profileId === profileId),
+  );
+}
 /**
  * Core precedence logic for a single capability.
  * Returns the highest precedence entry, its source, and a human-readable reason.
@@ -48,10 +60,10 @@ export function resolveCapability(
   intent: Intent,
   activeOverrides: TemporaryOverride[],
   preferences: Preference[],
-  modeDefaults: Record<Capability, CapabilityValue>
+  modeDefaults: Record<Capability, CapabilityValue>,
 ): ResolvedEntry | null {
   // 1. Current Command
-  const commandChanges = intent.requestedChanges.filter(c => c.capability === capability);
+  const commandChanges = intent.requestedChanges.filter((c) => c.capability === capability);
   if (commandChanges.length > 0) {
     const lastChange = commandChanges[commandChanges.length - 1]!;
     if (validatePolicyInput(capability, lastChange.value)) {
@@ -59,7 +71,7 @@ export function resolveCapability(
         capability,
         value: lastChange.value,
         source: 'command',
-        reason: 'from your current command'
+        reason: 'from your current command',
       };
     } else {
       throw new Error(`Invalid policy input for command capability: ${capability}`);
@@ -67,7 +79,9 @@ export function resolveCapability(
   }
 
   // 2. Temporary Override
-  const capOverrides = activeOverrides.filter(o => o.capability === capability && o.value !== null);
+  const capOverrides = activeOverrides.filter(
+    (o) => o.capability === capability && o.value !== null,
+  );
   if (capOverrides.length > 0) {
     const winningOverride = capOverrides.sort((a, b) => {
       if (a.expiresAt !== b.expiresAt) return b.expiresAt - a.expiresAt;
@@ -78,7 +92,7 @@ export function resolveCapability(
         capability,
         value: winningOverride.value!,
         source: 'override',
-        reason: 'from a temporary override'
+        reason: 'from a temporary override',
       };
     } else {
       throw new Error(`Invalid policy input for override capability: ${capability}`);
@@ -86,7 +100,7 @@ export function resolveCapability(
   }
 
   // 3. Persistent Profile
-  const profilePrefs = preferences.filter(p => p.capability === capability);
+  const profilePrefs = preferences.filter((p) => p.capability === capability);
   if (profilePrefs.length > 0) {
     const winningPref = profilePrefs[profilePrefs.length - 1]!;
     if (validatePolicyInput(capability, winningPref.value)) {
@@ -94,7 +108,7 @@ export function resolveCapability(
         capability,
         value: winningPref.value,
         source: 'profile',
-        reason: 'from your active profile'
+        reason: 'from your active profile',
       };
     } else {
       throw new Error(`Invalid policy input for profile capability: ${capability}`);
@@ -109,7 +123,7 @@ export function resolveCapability(
         capability,
         value: defaultVal,
         source: 'default',
-        reason: 'from system defaults'
+        reason: 'from system defaults',
       };
     } else {
       throw new Error(`Invalid policy input for default capability: ${capability}`);
