@@ -39,6 +39,21 @@ object BrightnessController {
   private const val KEY_RAW_PREFIX = "raw_"
   /** The user's SCREEN_BRIGHTNESS_MODE from before Ally touched anything. */
   private const val KEY_MODE = "snap_mode"
+  /**
+   * Open exactly while Ally has successfully changed the brightness and not yet put it back.
+   * While it is open, everything remembered below is frozen.
+   *
+   * OPENED BY A CONFIRMED WRITE, NOT BY A READ. It was originally set in snapshot(), which is
+   * wrong in both directions and was caught on device: the UI re-reads brightness to refresh its
+   * display right after a restore, so the flag re-armed the instant it had been cleared, and the
+   * NEXT session would then have refused to refresh a stale value — reintroducing ADR-110. A read
+   * borrows nothing. A write does.
+   *
+   * Deliberately its own key rather than reusing KEY_MODE as the flag: a device that cannot
+   * report SCREEN_BRIGHTNESS_MODE would never set KEY_MODE, and the protection below would
+   * quietly switch itself off on exactly the phones we have not tested.
+   */
+  private const val KEY_BORROWED = "borrowed"
 
   private fun prefs(context: Context): SharedPreferences =
     context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -55,7 +70,25 @@ object BrightnessController {
    * correct one. Session-scoped first-write-wins is enforced a layer up, in SnapshotStore.
    */
   private fun rememberRaw(context: Context, percent: Int, raw: Int) {
-    prefs(context).edit().putInt(KEY_RAW_PREFIX + percent, raw).commit()
+    // WHILE A BORROW IS OPEN, FIRST WRITE WINS (ADR-124). Outside one, last write wins.
+    //
+    // snapshot() is called for two different reasons and only one of them is a capture: the
+    // executor calls it to record the pre-change value, and the capability ALSO calls it to fill
+    // in `beforeValue` on a failure result — including the permission_needed row a blocked
+    // restore returns. That second call happens after Ally has already moved the screen, so it
+    // reports a raw value Ally itself caused. If the current percent happens to equal the
+    // snapshotted one (raw 186 and raw 187 both report 73%), an unconditional write replaces the
+    // user's 187 with Ally's 186, and the retry that follows the permission grant restores the
+    // wrong number — the ADR-110/116 bug, re-entering through a read instead of a write.
+    //
+    // KEY_BORROWED is present exactly while something is owed back. Across sessions, with
+    // nothing owed, the newest reading is still the correct one and overwrites freely — which is
+    // what stops a stale raw value from a previous session being restored in this one.
+    val p = prefs(context)
+    val key = KEY_RAW_PREFIX + percent
+    if (p.contains(KEY_BORROWED) && p.contains(key)) return
+    p.edit().putInt(key, raw).commit()
+
   }
 
   private fun recallRaw(context: Context, percent: Int): Int? {
@@ -64,10 +97,20 @@ object BrightnessController {
     return if (p.contains(key)) p.getInt(key, -1).takeIf { it >= 0 } else null
   }
 
-  /** First write wins, and a successful restore clears it so the next context captures fresh. */
+  private fun isBorrowed(context: Context): Boolean = prefs(context).contains(KEY_BORROWED)
+
+  private fun openBorrow(context: Context) {
+    prefs(context).edit().putBoolean(KEY_BORROWED, true).commit()
+  }
+
+  /**
+   * Frozen while a borrow is open, refreshed otherwise — the same rule as rememberRaw, and for
+   * the same reason. Outside a borrow the newest reading is the truth; inside one, the newest
+   * reading is Ally's own doing.
+   */
   private fun rememberMode(context: Context, mode: Int) {
-    val p = prefs(context)
-    if (!p.contains(KEY_MODE)) p.edit().putInt(KEY_MODE, mode).commit()
+    if (isBorrowed(context)) return
+    prefs(context).edit().putInt(KEY_MODE, mode).commit()
   }
 
   private fun recallMode(context: Context): Int? {
@@ -75,8 +118,9 @@ object BrightnessController {
     return if (p.contains(KEY_MODE)) p.getInt(KEY_MODE, -1).takeIf { it >= 0 } else null
   }
 
+  /** Closes the borrow: the mode is back, and fresh readings may be remembered again. */
   private fun forgetMode(context: Context) {
-    prefs(context).edit().remove(KEY_MODE).commit()
+    prefs(context).edit().remove(KEY_MODE).remove(KEY_BORROWED).commit()
   }
 
   private fun toPercent(raw: Int): Int = Math.round(raw * 100f / RAW_MAX).coerceIn(0, 100)
@@ -104,6 +148,8 @@ object BrightnessController {
     val raw = readRaw(context)
       ?: return mapOf("ok" to false, "reason" to "unsupported", "percent" to null, "raw" to null)
     val percent = toPercent(raw)
+    // Reading opens nothing. Outside a borrow these refresh freely, so a stale value from an
+    // older session is replaced by what is true now; inside one they are ignored.
     rememberRaw(context, percent, raw)
     readMode(context)?.let { rememberMode(context, it) }
     return mapOf(
@@ -115,8 +161,13 @@ object BrightnessController {
     )
   }
 
-  fun apply(context: Context, percent: Int): Map<String, Any?> =
-    write(context, percent, toRaw(percent), restoreMode = false)
+  fun apply(context: Context, percent: Int): Map<String, Any?> {
+    val out = write(context, percent, toRaw(percent), restoreMode = false)
+    // The borrow begins here, and only on a write we confirmed. A denied permission or a write
+    // the device did not hold borrows nothing, so it must not freeze anything either.
+    if (out["ok"] == true) openBorrow(context)
+    return out
+  }
 
   /**
    * Restores the user's brightness. When the target matches what we snapshotted we write the
@@ -131,7 +182,15 @@ object BrightnessController {
     // means we had to reconstruct it from the percent and may be a unit off. Never inferred
     // from the result — reported from whether the stored value was there.
     val exact = exactRaw != null
-    if (out["ok"] == true && exact) forgetMode(context)
+
+    // CLEARED ON A CONFIRMED WRITE, NOT ON AN EXACT ONE (ADR-124). These are two different
+    // questions. `exact` is about the raw value; KEY_MODE is the adaptive-brightness setting,
+    // and write(restoreMode = true) puts that back on any successful write, exact or not. Gating
+    // the clear on `exact` left a stale mode owed forever after an inexact restore, and because
+    // rememberMode is first-write-wins, the NEXT session would then hand the user a mode from
+    // the session before last. Clearing it also closes the borrow, which is what lets the raw
+    // memory above go back to accepting fresh readings.
+    if (out["ok"] == true) forgetMode(context)
 
     return out + mapOf("exact" to exact, "restoredRaw" to (exactRaw ?: toRaw(percent)))
   }

@@ -701,3 +701,83 @@ and added nobody to Priority: `priority_preference` was unchanged and no snapsho
 `expo run:android` with an emulator attached built an **x86_64-only** APK, which then failed on the
 phone with `INSTALL_FAILED_NO_MATCHING_ABIS`. Kill the emulator first, or the phone silently keeps
 running the previous build.
+
+---
+
+## Phase 3 — reversibility hardening (2026-08-31, SM-S928B, Android 16 / API 36)
+
+Everything below was read with `adb shell settings get`, `adb shell dumpsys notification` and
+`run-as cat` on the app's own `shared_prefs`. None of it is an app log.
+
+### Who is actually holding Do Not Disturb
+
+The most useful thing this phase turned up. `dumpsys notification` shows that our **explicit**
+`AutomaticZenRule` is not registered on this device at all — rung 1 is rejected here, so rung 2
+(`setInterruptionFilter`) does the work, and at targetSdk 35+ Android converts that call into an
+**implicit rule of ours**:
+
+```text
+ZenRule[id=implicit_com.ally.assistant, state=STATE_TRUE, name=Do Not Disturb (Ally),
+        pkg=com.ally.assistant, triggerDescription=Managed by Ally]
+```
+
+So "the filter reads priority" never told us whose rule put it there. Restore used to re-assert
+the snapshotted mode, which for anything other than `off` left that implicit rule **active** —
+a correct value held by the wrong owner, with the snapshots then cleared as a clean restore.
+
+**Verified safe first:** with the user's own DND on, Ally calling `setInterruptionFilter(ALL)`
+left `manualRule` at `STATE_TRUE` and `zen_mode` at `1`. It stands down Ally's rule, not theirs.
+
+### A3.6 — the user already had Do Not Disturb on
+
+The case Phase 2 never covered. DND turned on **by the user** first (`manualRule`,
+`SOURCE_USER_ACTION`), then a full Study cycle:
+
+| Stage | brightness | zen | Ally's implicit rule | user's manual rule |
+|---|---|---|---|---|
+| User's own DND on | 187 | 1 | STATE_FALSE | STATE_TRUE |
+| Study active | 102 | 1 | **STATE_TRUE** | STATE_TRUE |
+| **After End** | **187** | **1** | **STATE_FALSE** | **STATE_TRUE** |
+| User then turns their DND off | 187 | **0** | STATE_FALSE | — |
+
+That last row is the proof. If Ally were still holding the filter, turning off the user's own rule
+would have left `zen_mode` at 1. It went to 0, so Ally was holding nothing.
+
+### A3.7 — the Phase 2 regression, re-run after the Phase 3 changes
+
+| Stage | brightness | zen | priorityCategories |
+|---|---|---|---|
+| Before | **187** | 0 | `ALARMS, MEDIA` |
+| Study active | 102 | 1 | `ALARMS, REPEAT_CALLERS` |
+| After force-stop (pid 24773 → 25294) | 102 | 1 | `ALARMS, REPEAT_CALLERS` |
+| **After End** | **187** | **0** | **`ALARMS, MEDIA`** |
+
+`ally_dnd_policy.xml` held all five fields across the process death, and was `<map />` afterwards.
+
+### A3.5 — End pressed twice more with nothing running
+
+No crash, no device change: `zen=0`, `brightness=187` after each. The app stayed alive (pid 27372).
+
+### A bug this phase's own fix introduced, caught by reading the prefs
+
+After a clean restore, `ally_brightness.xml` still had `borrowed=true` — the flag had re-armed one
+moment after the restore cleared it, because the screen re-reads brightness to refresh its readout.
+The next session would then have refused to refresh a stale raw value, reintroducing ADR-110
+through the fix for ADR-116. The borrow now opens on a confirmed **write**, never a read. After the
+final cycle the file is correct:
+
+```xml
+<map> <int name="snap_mode" value="0" /> <int name="raw_73" value="187" /> ... </map>
+```
+
+— no `borrowed` key, so nothing is owed.
+
+### Not proven on this device
+
+- **ADR-125** (a borrowed notification policy given back with no `dnd` snapshot row) is covered by
+  unit tests only. Triggering it from the UI needs a context whose plan has priority but no DND
+  action, and no such profile exists yet. The durable store it reads is the same one ADR-120
+  already proved on this phone.
+- The harness's DND readout at the top of the home screen goes **stale** — it showed
+  `current: priority` while `zen_mode` was 0. A display bug in the temporary Phase 2 harness,
+  which A6.6 removes; the executor and the device were both correct.

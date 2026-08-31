@@ -227,12 +227,35 @@ export async function executePlan(plan: ActionPlan, deps: ExecutionDeps): Promis
 // A-V2 — restore
 // ---------------------------------------------------------------------------
 
+/**
+ * The user's NotificationManager.Policy, as borrowed state that outlives the process.
+ *
+ * WHY IT IS NOT A SnapshotStore ROW (ADR-125). It is exactly the same KIND of thing — a value
+ * Ally took, must give back, and must not lose to a process death — but it cannot travel as a
+ * `DeviceSnapshot`, because that row is keyed by `Capability` and `CAPABILITIES` is frozen with
+ * no member for it. Rather than quietly widen a contract three people agreed to, or invent a
+ * second snapshot table, the policy stays where DndController already keeps it: SharedPreferences,
+ * captured first-write-wins, cleared only on a confirmed read-back, retained on failure. The same
+ * contract, a different drawer. This port is only how the executor reaches it.
+ */
+export interface BorrowedPolicy {
+  /** True while the user's original policy is still owed back. */
+  hasSaved(): boolean;
+  /** Puts it back. Never throws in the native implementation; guarded here regardless. */
+  restore(): { ok: boolean; restored: boolean; reason: string | null };
+}
+
 export interface RestoreDeps {
   /** Same rule as execution: the executor is handed a device, it never reaches for one. */
   registry: DeviceRegistry;
   /** Where the pre-change values were recorded. Required — there is nothing to restore without it. */
   snapshots: SnapshotStore;
   onProgress?: (event: ActionProgress) => void;
+  /**
+   * The borrowed notification policy, when the backend has one. Optional: a caller that wires
+   * nothing still gets correct snapshot-driven restoration, it simply cannot close the gap below.
+   */
+  policy?: BorrowedPolicy;
 }
 
 /**
@@ -276,6 +299,11 @@ export async function restoreSession(
   const rows = lifoOrder(await snapshots.forSession(sessionId));
 
   const results: ActionResult[] = [];
+
+  // Whether the walk below will reach the notification policy on its own. `DndCapability.restore`
+  // gives the policy back as part of restoring the filter, so a `dnd` row already covers it — and
+  // owns its retry. The fallback after the loop exists for the case where there is no such row.
+  const hasDndRow = rows.some((row) => row.capability === 'dnd');
 
   for (const [index, row] of rows.entries()) {
     const emit = (phase: ActionPhase, result: ActionResult | null): void =>
@@ -360,5 +388,75 @@ export async function restoreSession(
     }
   }
 
+  // ---------------------------------------------------------------------------
+  // The policy Ally borrowed without a snapshot row to carry it (ADR-125)
+  // ---------------------------------------------------------------------------
+  //
+  // Priority runs OUTSIDE the plan: ContextCoordinator applies it after the actions, through an
+  // injected thunk, and it rewrites the user's NotificationManager.Policy whether or not `dnd`
+  // was ever in the plan. So a context of "dim the screen and let Mom through" borrows the
+  // policy and captures no `dnd` row — and this walk, which is driven entirely by rows, had
+  // nothing to walk. The user's own notification policy stayed replaced by Ally's, permanently,
+  // and the restore reported IDLE because every row it knew about did go back.
+  //
+  // Reported as a `dnd` result because that is what it is — the Do Not Disturb policy — and
+  // because it must be counted: an unrestored policy has to make the summary PARTIAL and keep
+  // the session retryable, which only happens if it appears in this array.
+  if (!hasDndRow && deps.policy) {
+    const outcome = await restoreBorrowedPolicy(deps.policy);
+    if (outcome) {
+      const index = results.length;
+      results.push(outcome);
+      for (const phase of ['pending', 'running', 'settled'] as const) {
+        onProgress?.({
+          index,
+          capability: 'dnd',
+          phase,
+          result: phase === 'settled' ? outcome : null,
+          declaredPermissionMismatch: false,
+        });
+      }
+    }
+  }
+
   return results;
+}
+
+/**
+ * Gives back a policy that no snapshot row covers. Returns null when nothing was borrowed —
+ * silence, not a row, because a context that never touched priority has nothing to report.
+ */
+async function restoreBorrowedPolicy(policy: BorrowedPolicy): Promise<ActionResult | null> {
+  try {
+    if (!policy.hasSaved()) return null;
+  } catch {
+    // A store we cannot even question is not evidence that nothing is owed, but there is also
+    // nothing actionable to report. The device is unchanged either way.
+    return null;
+  }
+
+  let out: { ok: boolean; restored: boolean; reason: string | null };
+  try {
+    out = policy.restore();
+  } catch (e) {
+    return resultFor(
+      'dnd',
+      'failed',
+      e instanceof Error ? e.message : 'Your notification settings did not go back.',
+    );
+  }
+
+  if (out.restored) {
+    return resultFor('dnd', 'restored', 'Your own notification settings are back.');
+  }
+
+  // Not restored. `permission` is its own outcome and stays retryable — the saved policy is
+  // retained by the native side precisely so granting access and ending again finishes the job.
+  return resultFor(
+    'dnd',
+    out.reason === 'permission' ? 'permission_needed' : 'failed',
+    out.reason === 'permission'
+      ? 'Do Not Disturb access is needed before Ally can put your notification settings back.'
+      : 'Your notification settings did not go back.',
+  );
 }

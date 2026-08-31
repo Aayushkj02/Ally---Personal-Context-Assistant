@@ -40,10 +40,16 @@ export function createDndCapability(native: AllyNativeSpec): DeviceCapability {
     }
   };
 
-  /** Shared by execute() and restore() — same ladder, only the success label differs. */
+  /**
+   * Shared by execute() and restore(). Same ladder, two differences: the success label, and
+   * WHICH native call moves the filter — `dndApply` asserts Ally's rule, `dndRelease` stands it
+   * down (ADR-123). Everything before that point is identical on purpose, so a restore cannot
+   * skip an availability or permission check that an apply performs.
+   */
   const applyMode = (
     value: CapabilityValue,
     successStatus: 'applied' | 'restored',
+    move: (mode: DndMode) => ReturnType<AllyNativeSpec['dndApply']> = (m) => native.dndApply(m),
   ): ActionResult => {
     if (!isDndMode(value)) {
       return fail('failed', `"${String(value)}" is not a Do Not Disturb mode.`, readMode());
@@ -70,7 +76,7 @@ export function createDndCapability(native: AllyNativeSpec): DeviceCapability {
 
     let res;
     try {
-      res = native.dndApply(value);
+      res = move(value);
     } catch (e) {
       return fail(
         'failed',
@@ -148,6 +154,12 @@ export function createDndCapability(native: AllyNativeSpec): DeviceCapability {
      * A policy that will not go back does not stop the mode going back — the same
      * "one failure never aborts the walk" rule the executor follows. `nothing_saved` is the
      * normal case for a context that never touched priority.
+     *
+     * The filter goes back through `dndRelease`, NOT `dndApply` (ADR-123). Re-applying the
+     * snapshotted mode would rebuild and re-activate Ally's own zen rule for any mode other
+     * than "off" — which reads back as a perfect restore while quietly leaving the user's
+     * phone in Do Not Disturb on Ally's authority, with the snapshots cleared and nothing left
+     * to turn it off. Releasing hands the filter back to whatever the user had underneath.
      */
     async restore(previous) {
       try {
@@ -155,7 +167,7 @@ export function createDndCapability(native: AllyNativeSpec): DeviceCapability {
       } catch {
         // Reported by the native side as a retained saved policy; the mode still goes back.
       }
-      return applyMode(previous, 'restored');
+      return applyMode(previous, 'restored', (mode) => native.dndRelease(mode));
     },
   };
 }
