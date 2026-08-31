@@ -409,3 +409,67 @@ describe('A4.3 — a preference that is removed stops driving the device', () =>
     expect(__getMockBrightnessPercent()).toBe(40);
   });
 });
+
+// ---------------------------------------------------------------------------
+// A4.6 — preference changes DURING an active context
+// ---------------------------------------------------------------------------
+//
+// NOT IMPLEMENTED, DELIBERATELY. What should happen when a preference changes while a context is
+// already running is not defined by any existing interface: `resolve()` is called from exactly
+// one place, `activateFromText`, which also calls `startSession` — so resolution and starting a
+// context are the same act, and there is no way to re-resolve against a session that is already
+// running. The frozen SESSION_STATES even contains `OVERRIDING`, and nothing sets it.
+//
+// So this block does not invent the semantics. It pins down the GROUND those semantics would be
+// built on: what the device layer does today, and the one trap waiting for whoever defines them.
+// Every assertion here is current behaviour, not desired behaviour.
+
+describe('A4.6 — the ground a mid-context change would be built on', () => {
+  it("SAFE: re-applying within the SAME session keeps the user's original value", async () => {
+    __setMockBrightnessRaw(USER_RAW);
+    const snapshots = createRepositorySnapshotStore();
+    const { plan } = await activateStudy();
+
+    await startContext(plan, { registry: mockRegistry, snapshots });
+    expect(__getMockBrightnessPercent()).toBe(40);
+
+    // The change, expressed as a second run of the same session id. First-write-wins in the
+    // SnapshotStore means the second capture is discarded, so what is owed back is still 187.
+    const changed = { ...plan, actions: [{ ...plan.actions[1]!, value: 15 }] };
+    await startContext(changed, { registry: mockRegistry, snapshots });
+    expect(__getMockBrightnessPercent()).toBe(15);
+
+    const rows = await snapshots.forSession(plan.sessionId);
+    expect(rows.find((r) => r.capability === 'brightness')?.previousValue).toBe(73);
+
+    await endContext(plan.sessionId, { registry: mockRegistry, snapshots });
+    expect(__getMockBrightnessRaw()).toBe(USER_RAW);
+  });
+
+  it("THE TRAP: re-activating starts a SECOND session, which captures Ally's own values", async () => {
+    __setMockBrightnessRaw(USER_RAW);
+    const first = await activateStudy();
+    const firstStore = createRepositorySnapshotStore();
+    await startContext(first.plan, { registry: mockRegistry, snapshots: firstStore });
+    expect(__getMockBrightnessPercent()).toBe(40);
+
+    // Whoever implements A4.6 must NOT reach for activateFromText to express the change.
+    const second = await activateStudy();
+    expect(second.plan.sessionId).not.toBe(first.plan.sessionId);
+
+    const secondStore = createRepositorySnapshotStore();
+    await startContext(second.plan, { registry: mockRegistry, snapshots: secondStore });
+
+    // 40 — the value ALLY set, now recorded as if it were the user's. Ending this session would
+    // hand the user back a screen Ally dimmed and call it their own setting. The genuine original
+    // is stranded on the first session, which nothing will ever end.
+    const rows = await secondStore.forSession(second.plan.sessionId);
+    expect(rows.find((r) => r.capability === 'brightness')?.previousValue).toBe(40);
+    expect(rows.find((r) => r.capability === 'brightness')?.previousValue).not.toBe(73);
+
+    // Cleanup: put the phone back through the session that actually holds the truth.
+    await endContext(second.plan.sessionId, { registry: mockRegistry, snapshots: secondStore });
+    await endContext(first.plan.sessionId, { registry: mockRegistry, snapshots: firstStore });
+    expect(__getMockBrightnessRaw()).toBe(USER_RAW);
+  });
+});
