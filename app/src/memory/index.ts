@@ -34,3 +34,5 @@ export {
   getOriginalValue,
 } from './restoreHistory';
 export type { RestoreHistoryEntry } from './restoreHistory';
+export { findReversibleContext, getRestorationTarget, findRestorationTarget } from './reversal';
+export type { RestorationTarget } from './reversal';
