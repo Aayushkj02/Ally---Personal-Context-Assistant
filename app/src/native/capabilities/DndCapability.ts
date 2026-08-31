@@ -136,7 +136,25 @@ export function createDndCapability(native: AllyNativeSpec): DeviceCapability {
       return applyMode(value, 'applied');
     },
 
+    /**
+     * Restores the interruption filter AND the notification policy.
+     *
+     * Both are user state Ally borrowed, and the policy is given back FIRST so that the
+     * filter change lands on top of the user's own policy rather than Ally's. It is restored
+     * unconditionally, not only when returning to `off`: a user who already had Do Not
+     * Disturb on before the context used to get their mode back and silently keep Ally's
+     * priority policy (ADR-120).
+     *
+     * A policy that will not go back does not stop the mode going back — the same
+     * "one failure never aborts the walk" rule the executor follows. `nothing_saved` is the
+     * normal case for a context that never touched priority.
+     */
     async restore(previous) {
+      try {
+        native.dndRestorePolicy();
+      } catch {
+        // Reported by the native side as a retained saved policy; the mode still goes back.
+      }
       return applyMode(previous, 'restored');
     },
   };

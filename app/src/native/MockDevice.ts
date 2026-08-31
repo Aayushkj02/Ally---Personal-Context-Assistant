@@ -69,6 +69,41 @@ const state: MockState = {
  */
 const prefs = new Map<string, number>();
 
+/**
+ * The five ints of a NotificationManager.Policy (ADR-120).
+ *
+ * Modelled in full, not just the three Ally writes, because Ally's 3-argument write replaces
+ * `suppressedVisualEffects` and `priorityConversationSenders` with constructor defaults — so a
+ * restore that only puts three back hands the user a policy they never had. The mock carries all
+ * five for the same reason the device does.
+ */
+export interface MockPolicy {
+  priorityCategories: number;
+  priorityCallSenders: number;
+  priorityMessageSenders: number;
+  suppressedVisualEffects: number;
+  priorityConversationSenders: number;
+}
+
+/** A plausible "user's own settings" starting point: alarms + media, starred senders. */
+const DEFAULT_POLICY: MockPolicy = {
+  priorityCategories: 0b100010,
+  priorityCallSenders: 2,
+  priorityMessageSenders: 2,
+  suppressedVisualEffects: 511,
+  priorityConversationSenders: 1,
+};
+
+/** The device's live policy. Survives process death, because the phone owns it. */
+let livePolicy: MockPolicy = { ...DEFAULT_POLICY };
+
+/**
+ * Ally's saved copy — SharedPreferences, so it survives process death too. That distinction is
+ * the whole of ADR-120: the heap does not survive, and a policy saved only in the heap is a
+ * policy the user never gets back.
+ */
+let savedPolicy: MockPolicy | null = null;
+
 const rawKey = (percent: number): string => `raw_${percent}`;
 
 function rememberRaw(percent: number, raw: number): void {
@@ -90,6 +125,8 @@ export function __getMockState(): Readonly<MockState> {
 }
 
 export function __resetMockState(): void {
+  livePolicy = { ...DEFAULT_POLICY };
+  savedPolicy = null;
   state.dnd = 'off';
   state.brightnessRaw = DEFAULT_RAW;
   state.ringer = 'normal';
@@ -128,7 +165,65 @@ export function __setMockBrightnessRaw(raw: number): void {
  * after-process-death test starts failing instead of silently returning a value one raw unit off.
  */
 export function __simulateProcessDeath(): void {
-  // Nothing to clear today. Any future module-level cache belongs here, not in `prefs`.
+  // `savedPolicy` and `livePolicy` deliberately survive: the first stands in for
+  // SharedPreferences, the second for the phone's own setting. Neither is heap state a real
+  // restart would lose, and a test that restores exactly across this call is proving it.
+}
+
+/** Test hook: the device's live notification policy, all five fields. */
+export function __getMockPolicy(): MockPolicy {
+  return { ...livePolicy };
+}
+
+/** Test hook: put the device in a specific policy state, as a real phone would already be. */
+export function __setMockPolicy(policy: MockPolicy): void {
+  livePolicy = { ...policy };
+}
+
+/** Test hook: what Ally has saved to put back, or null. */
+export function __getMockSavedPolicy(): MockPolicy | null {
+  return savedPolicy ? { ...savedPolicy } : null;
+}
+
+/**
+ * Applies Ally's priority policy, mirroring DndController.setPriority().
+ *
+ * FIRST WRITE WINS on the save, and the write goes through the 3-field shape Android's
+ * 3-argument constructor produces — which is exactly why the other two fields need restoring.
+ */
+export function __applyMockPriorityPolicy(calls: boolean, messages: boolean): void {
+  if (!savedPolicy) savedPolicy = { ...livePolicy };
+
+  let categories = 0b100000; // ALARMS always
+  if (calls) categories |= 0b1;
+  if (messages) categories |= 0b100;
+
+  livePolicy = {
+    priorityCategories: categories,
+    priorityCallSenders: calls ? 2 : 0,
+    priorityMessageSenders: messages ? 2 : 0,
+    // The 3-argument constructor's defaults — the user's values are gone until restore.
+    suppressedVisualEffects: 0,
+    priorityConversationSenders: 0,
+  };
+}
+
+/**
+ * Puts the saved policy back, mirroring DndController.restoreSavedPolicy().
+ *
+ * Driven by whether a policy was saved, never by the DND mode. Cleared only on a confirmed
+ * restore, so a failure stays retryable with the original intact.
+ */
+export function __restoreMockPolicy(): { ok: boolean; restored: boolean; reason: string | null } {
+  if (!savedPolicy) return { ok: true, restored: false, reason: 'nothing_saved' };
+
+  if (!state.permissions.notification_policy) {
+    return { ok: false, restored: false, reason: 'permission' };
+  }
+
+  livePolicy = { ...savedPolicy };
+  savedPolicy = null;
+  return { ok: true, restored: true, reason: null };
 }
 
 function permission(key: PermissionRequirement['key']): PermissionRequirement {
@@ -226,9 +321,25 @@ function makeCapability<K extends keyof MockState>(
   };
 }
 
-const dnd = makeCapability('dnd', 'dnd', 'notification_policy', (v) =>
+const dndMode = makeCapability('dnd', 'dnd', 'notification_policy', (v) =>
   v === 'off' ? 'Interruptions back to normal.' : `Interruptions set to ${v}.`,
 );
+
+/**
+ * DND restores BOTH borrowed things, matching DndCapability on the real backend (ADR-007
+ * parity): the notification policy first, then the interruption filter on top of it.
+ *
+ * The policy goes back regardless of which mode is being returned to — that unconditional-ness
+ * is the ADR-120 fix, and a mock that restored it only on `off` would let the bug back in
+ * untested.
+ */
+const dnd: DeviceCapability = {
+  ...dndMode,
+  async restore(previous) {
+    __restoreMockPolicy();
+    return dndMode.restore(previous);
+  },
+};
 
 /**
  * Brightness cannot use makeCapability: the contract currency is a PERCENT but the device stores

@@ -736,3 +736,42 @@ Because entries never move and IDs never collide, a merge conflict here is alway
   emergency bypass is unconditional. Ending the context put the policy back to `ALARMS,MEDIA`.
   The coordinator reported `calls: enforced`, `sms: unsupported`, `whatsapp: preference_only`
   alongside a `PARTIAL` plan — four vocabularies coexisting rather than collapsing.
+
+### ADR-120 — The notification policy is saved on disk, and restored by existence, not by mode
+- **Date:** 2026-08-31 · **Author:** Aayush · **Phase:** 2 · **Status:** Accepted
+- **Decision:** `DndController` persists the user's original `NotificationManager.Policy` to
+  SharedPreferences — **all five int fields**, written with `commit()`, first-write-wins — and
+  restores it through a new `restoreSavedPolicy()` that fires whenever a saved policy exists,
+  not only when the DND mode being returned to is `off`. `DndCapability.restore()` calls it
+  before putting the interruption filter back. A confirmed restore clears the saved copy; a
+  permission failure or a mismatch retains it for a retry.
+- **Reason:** Two defects, one cause. The saved copy was a field on a Kotlin `object`, so it
+  lived exactly as long as the process — and a context routinely outlives its process. Worse
+  than a crash: `restorePolicy()` read `null` and did nothing, silently, so a phone kept Ally's
+  policy forever with every status reading green. Observed directly during A-V7. And the restore
+  was invoked only inside the `mode == "off"` branch, so a user who already had Do Not Disturb on
+  before the context got their mode back and silently kept Ally's policy — the borrowed state was
+  never returned in the one case where the user had most obviously configured it themselves.
+  Existence of a saved policy is the only condition that has anything to do with whether it
+  should be given back.
+  **All five fields** because Ally mutates the policy through the 3-argument `Policy` constructor,
+  which replaces `suppressedVisualEffects` and `priorityConversationSenders` with that
+  constructor's defaults. Those two are borrowed whether Ally meant to touch them or not, so
+  restoring only the three it sets on purpose would hand the user a policy they never had.
+  Confirmed against the API 36 `android.jar`: five public int fields, three constructors, the
+  widest taking all five.
+- **Alternatives considered:** Put the policy in `device_snapshot` — `DeviceSnapshot` holds one
+  scalar per capability, so this would need either a fake `dnd_policy` capability in the frozen
+  `CAPABILITIES` allow-list (a pseudo-capability with no value, no permission and no read-back
+  for the executor to run) or a five-int blob encoded into `previousValue`, which is rendered as
+  user-facing provenance on the Memory screen. Both are frozen-contract damage for something that
+  is purely a platform detail of one native controller. Keep restoring on `mode == "off"` and
+  document the gap — that is the bug. Save only the three fields Ally writes — a partial
+  approximation, which is the thing this codebase most consistently refuses to ship.
+- **Impact:** The policy restore no longer depends on the process, the mode, or the order the
+  capability happens to be restored in. It is symmetric with ADR-116's brightness fix, so the
+  native module now has one durability pattern rather than two. `policySnapshot()` returns the raw
+  ints for both saved and current, so exactness can be asserted rather than eyeballed — and while
+  adding that I found `describe()` had been emitting Kotlin's escaped-dollar literal
+  (`${'$'}{it.priorityCategories}`) instead of the value, making every previous policy log
+  meaningless. Fixed in passing; it affected debug output only, never behaviour.

@@ -67,6 +67,21 @@ export interface AllyNativeSpec {
     allowMessages: boolean,
   ): Record<string, unknown>;
   dndPolicySnapshot(): Record<string, unknown>;
+  /**
+   * Puts the user's original NotificationManager.Policy back, from durable storage (ADR-120).
+   *
+   * `restored` false with reason `nothing_saved` means there was nothing to put back, which is
+   * success. A `permission` or `mismatch` reason RETAINS the saved policy so the caller can
+   * retry; only a confirmed restore clears it.
+   */
+  dndRestorePolicy(): {
+    ok: boolean;
+    restored: boolean;
+    reason: string | null;
+    saved?: string | null;
+    after?: string | null;
+  };
+  dndHasSavedPolicy(): boolean;
 
   // Brightness (T4). Percent is the contract currency; raw values prove exact restoration.
   brightnessIsAvailable(): boolean;
