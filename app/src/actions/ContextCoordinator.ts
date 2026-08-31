@@ -31,6 +31,7 @@ import type {
   SessionState,
 } from '../types';
 import { executePlan, restoreSession, type ActionProgress, type BorrowedPolicy } from './executors';
+import { explainResults, type ExplainedResult } from './provenance';
 import type { SnapshotStore } from './SnapshotStore';
 import {
   summarisePlan,
@@ -124,6 +125,16 @@ export interface StartContextResult {
    * null means no applier was wired, not that priority succeeded or failed.
    */
   priority: ChannelEnforcement[] | null;
+  /**
+   * Each outcome paired with the reason its planned action carried — "from your active profile"
+   * for a value the user taught Ally, "from system defaults" for one they never chose (A4.2).
+   *
+   * Derived, not stored, and the sentences are Dhrey's verbatim. It rides on the result because
+   * this is the only place that holds BOTH the plan and the outcomes; a caller that wanted it
+   * later would have to keep the plan alive itself, and the first one that forgot would silently
+   * show a phone full of changes with nothing to explain them.
+   */
+  explained: ExplainedResult[];
 }
 
 export interface EndContextResult {
@@ -200,7 +211,7 @@ export async function startContext(
     await fire(hooks?.onActivated, () => hooks?.onActivated?.(sessionId, state));
   }
 
-  return { sessionId, state, results, summary, priority };
+  return { sessionId, state, results, summary, priority, explained: explainResults(plan, results) };
 }
 
 export interface EndContextOptions {

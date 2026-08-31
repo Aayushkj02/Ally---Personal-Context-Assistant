@@ -29,6 +29,7 @@ import {
   startContext,
   endContext as endContextLifecycle,
   createRepositorySnapshotStore,
+  type ExplainedResult,
   type LifecycleHooks,
 } from './src/actions';
 import { activateFromText } from './src/services/contextOrchestrator';
@@ -99,6 +100,14 @@ export default function App() {
   const [label, setLabel] = useState('Context');
   const [state, setState] = useState<ContextState>('READY');
   const [results, setResults] = useState<ActionResult[]>([]);
+  /**
+   * Why each of those changes was made, positionally aligned with `results` (A4.2).
+   *
+   * Cleared whenever the results come from a RESTORE rather than a plan. A restore is driven by
+   * snapshots, so there is no reason to give — and leaving the apply's reasons in place would
+   * caption "Restored" rows with the explanation for why they were changed in the first place.
+   */
+  const [reasons, setReasons] = useState<readonly (string | null)[]>([]);
   const [priority, setPriority] = useState<ChannelEnforcement[] | null>(null);
   const [emergency, setEmergency] = useState<EmergencyStatus | null>(null);
   const [busy, setBusy] = useState(false);
@@ -149,6 +158,7 @@ export default function App() {
         label={label}
         state={state}
         results={results}
+        reasons={reasons}
         priority={priority}
         emergency={emergency}
         busy={busy}
@@ -171,6 +181,7 @@ export default function App() {
               policy: borrowedPolicy,
             });
             setResults(r.results);
+            setReasons([]);
             setState(r.state);
             setPriority(null);
             setEmergency(null);
@@ -197,6 +208,7 @@ export default function App() {
       onStarted={(next) => {
         setState(next.state);
         setResults(next.results);
+        setReasons(next.explained.map((e) => e.reason));
         setPriority(next.priority);
         setEmergency(null);
         void refreshContext();
@@ -215,6 +227,7 @@ function DeviceHarness({
   onStarted: (r: {
     state: ContextState;
     results: ActionResult[];
+    explained: ExplainedResult[];
     priority: ChannelEnforcement[] | null;
   }) => void;
 }) {
@@ -282,7 +295,7 @@ function DeviceHarness({
 
       // One call. The execute -> summarise -> mark-active sequence lives in the coordinator now,
       // not here; the harness supplies a device, a store and the hooks (ADR-118).
-      const { state, results, summary, priority } = await startContext(outcome.plan, {
+      const { state, results, summary, priority, explained } = await startContext(outcome.plan, {
         registry: device,
         // Durable: Dhrey's device_snapshot table, reached through the SnapshotStore port.
         snapshots: createRepositorySnapshotStore(),
@@ -300,7 +313,7 @@ function DeviceHarness({
 
       // A-V9: hand the outcome to the shell so the Active Context screen shows the real thing
       // rather than recomputing it. The shell holds it for display only.
-      onStarted({ state, results, priority });
+      onStarted({ state, results, explained, priority });
 
       setLog(results.slice().reverse());
       setProbe({

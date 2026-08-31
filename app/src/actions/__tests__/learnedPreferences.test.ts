@@ -42,7 +42,8 @@ import {
   __getMockBrightnessPercent,
   __getMockState,
 } from '../../native/MockDevice';
-import { startContext, endContext, createRepositorySnapshotStore } from '../index';
+import { startContext, endContext, createRepositorySnapshotStore, explainResults } from '../index';
+import type { ActionPlan, ActionResult, PlannedAction } from '../../types';
 
 const STUDY_PROFILE = 'profile_study';
 const STUDY_SENTENCE = "I'm going to study for two hours.";
@@ -59,6 +60,15 @@ const offlineEngine = {
     const result = await new FallbackParser().parse(text);
     return IntentValidator.validate(result as ParseResult);
   },
+};
+
+/** A plain brightness action, for the two pairing tests that need a plan without the database. */
+const BRIGHTNESS_ACTION: PlannedAction = {
+  capability: 'brightness',
+  value: 40,
+  needsSnapshot: true,
+  requiredPermission: 'write_settings',
+  reason: 'from system defaults',
 };
 
 const seededPreferences: string[] = [];
@@ -221,6 +231,105 @@ describe('A4.2 — a learned preference does not weaken restoration', () => {
 
     expect(end.state).toBe('IDLE');
     expect(__getMockBrightnessRaw()).toBe(USER_RAW);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// A4.2 — the provenance survives the executor boundary
+// ---------------------------------------------------------------------------
+
+describe('A4.2 — Ally can say why, not just what', () => {
+  it('pairs every outcome with the reason its planned action carried', async () => {
+    await rememberBrightness(TAUGHT_PERCENT, 'Remember that I prefer 25% brightness during study');
+    __setMockBrightnessRaw(USER_RAW);
+
+    const { plan } = await activateStudy();
+    const r = await startContext(plan, {
+      registry: mockRegistry,
+      snapshots: createRepositorySnapshotStore(),
+    });
+
+    expect(r.explained).toHaveLength(r.results.length);
+    for (const [i, e] of r.explained.entries()) {
+      expect(e.result).toBe(r.results[i]);
+      expect(e.reason).toBe(plan.actions[i]?.reason);
+    }
+  });
+
+  it('distinguishes a value the user taught from one they never chose, in the same run', async () => {
+    await rememberBrightness(TAUGHT_PERCENT, 'Remember that I prefer 25% brightness during study');
+    __setMockBrightnessRaw(USER_RAW);
+
+    const { plan } = await activateStudy();
+    const r = await startContext(plan, {
+      registry: mockRegistry,
+      snapshots: createRepositorySnapshotStore(),
+    });
+
+    const byCapability = new Map(r.explained.map((e) => [e.result.capability, e.reason]));
+
+    // This is the whole point of the product: the screen can now say which of these the user
+    // is responsible for and which Ally chose for them.
+    expect(byCapability.get('brightness')).toMatch(/profile/i);
+    expect(byCapability.get('dnd')).toMatch(/default/i);
+  });
+
+  it('invents nothing — the sentence comes from the plan, copied verbatim', async () => {
+    const { plan } = await activateStudy();
+    const r = await startContext(plan, {
+      registry: mockRegistry,
+      snapshots: createRepositorySnapshotStore(),
+    });
+
+    const planned = plan.actions.map((a) => a.reason);
+    expect(r.explained.map((e) => e.reason)).toEqual(planned);
+  });
+
+  it('pairs positionally, so two actions on one capability keep their own reasons', () => {
+    // A plan may legitimately name the same capability twice. Matching on capability instead of
+    // position would attribute the first action's reason to both rows.
+    const twice: ActionPlan = {
+      sessionId: 'sess_x',
+      restoreOnEnd: true,
+      actions: [
+        { ...BRIGHTNESS_ACTION, value: 30, reason: 'from your active profile' },
+        { ...BRIGHTNESS_ACTION, value: 10, reason: 'from your current command' },
+      ],
+    };
+    const results: ActionResult[] = [
+      { capability: 'brightness', status: 'applied', beforeValue: 73, afterValue: 30, message: '' },
+      { capability: 'brightness', status: 'applied', beforeValue: 30, afterValue: 10, message: '' },
+    ];
+
+    expect(explainResults(twice, results).map((e) => e.reason)).toEqual([
+      'from your active profile',
+      'from your current command',
+    ]);
+  });
+
+  it('gives a null reason to a row no plan produced, rather than dropping it', () => {
+    // restoreSession() can append a row for the borrowed notification policy (ADR-125). It was
+    // never planned, so there is no reason to give — and losing the row would mean the screen
+    // showed fewer things than actually happened.
+    const plan: ActionPlan = {
+      sessionId: 'sess_y',
+      restoreOnEnd: true,
+      actions: [BRIGHTNESS_ACTION],
+    };
+    const results: ActionResult[] = [
+      {
+        capability: 'brightness',
+        status: 'restored',
+        beforeValue: 40,
+        afterValue: 73,
+        message: '',
+      },
+      { capability: 'dnd', status: 'restored', beforeValue: null, afterValue: null, message: '' },
+    ];
+
+    const explained = explainResults(plan, results);
+    expect(explained).toHaveLength(2);
+    expect(explained[1]?.reason).toBeNull();
   });
 });
 

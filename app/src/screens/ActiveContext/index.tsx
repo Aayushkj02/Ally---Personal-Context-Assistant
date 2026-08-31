@@ -48,6 +48,12 @@ export interface ActiveContextScreenProps {
   label: string;
   state: ContextState;
   results: ActionResult[];
+  /**
+   * Why each change was made, positionally aligned with `results` (A4.2). Comes from
+   * `startContext().explained`; absent for a restore, which is driven by snapshots rather than
+   * by a plan and therefore has no reason to give.
+   */
+  reasons?: readonly (string | null)[];
   priority: ChannelEnforcement[] | null;
   emergency: EmergencyStatus | null;
   busy?: boolean;
@@ -70,6 +76,7 @@ export default function ActiveContextScreen({
   label,
   state,
   results,
+  reasons,
   priority,
   emergency,
   busy = false,
@@ -141,6 +148,10 @@ export default function ActiveContextScreen({
                 {String(r.beforeValue)} → {String(r.afterValue)}
               </Text>
               <Text style={s.rowMessage}>{r.message}</Text>
+              {/* A4.2: where the value came from, verbatim from the plan. Rendered separately
+                  from the message because they answer different questions — the message says
+                  what the phone did, this says why Ally asked for it. */}
+              {reasons?.[i] ? <Text style={s.rowReason}>{reasons[i]}</Text> : null}
             </View>
           );
         })}
@@ -218,6 +229,7 @@ const s = StyleSheet.create({
   rowTitle: { ...typography.presets.bodyMedium, color: colors.textPrimary },
   rowDetail: { fontSize: typography.size.sm, color: colors.textSecondary },
   rowMessage: { fontSize: typography.size.xs, color: colors.textTertiary },
+  rowReason: { fontSize: typography.size.xs, color: colors.textTertiary, fontStyle: 'italic' },
   badge: { paddingHorizontal: spacing.md, paddingVertical: spacing.xs, borderRadius: radius.pill },
   badgeText: {
     color: colors.textInverse,
