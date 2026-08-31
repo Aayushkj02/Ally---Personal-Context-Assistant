@@ -4,6 +4,7 @@ import android.app.AutomaticZenRule
 import android.app.NotificationManager
 import android.content.ComponentName
 import android.content.Context
+import android.content.SharedPreferences
 import android.net.Uri
 import android.os.Build
 import android.service.notification.Condition
@@ -41,37 +42,146 @@ object DndController {
     context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
 
   /**
-   * The user's NotificationManager.Policy as it was before Ally first touched it.
+   * The user's NotificationManager.Policy as it was before Ally first touched it — ON DISK.
    *
    * Ally mutates this to express the priority-caller exception, so it is user state we
-   * borrowed and must give back — exactly like the interruption filter. Captured once, on the
+   * borrowed and must give back, exactly like the interruption filter. Captured once, on the
    * first mutation, and written back when the context ends.
    *
-   * LIMITATION: this lives for the process only. If Ally is killed mid-context the policy is
-   * not restored on next launch. Durable snapshots belong in Dhrey's device_snapshot table;
-   * `policySnapshot()` exposes the serialized form so that can be wired up in Phase 2.
+   * IT LIVES IN SHAREDPREFERENCES, NOT THE HEAP (ADR-120). It used to be a field on this
+   * object, which is correct exactly as long as the process lives — and a context routinely
+   * outlives its process. Observed on device: a policy applied before a process death was
+   * still on the phone afterwards with no saved copy left to restore from, and the restore
+   * reported no error, because a null saved policy was a silent no-op. `commit()` rather than
+   * `apply()` for the reason ADR-116 gives: the scenario being defended against is the process
+   * dying before an async flush lands.
+   *
+   * ALL FIVE FIELDS ARE STORED, not just the three Ally writes. Ally mutates the policy through
+   * the 3-argument Policy constructor, which replaces `suppressedVisualEffects` and
+   * `priorityConversationSenders` with that constructor's defaults — so those two are just as
+   * much borrowed state as the three set on purpose, and restoring only three would hand back
+   * a policy the user never had. Confirmed against the API 36 android.jar: five public int
+   * fields, and a 5-argument constructor to rebuild them.
    */
-  private var savedPolicy: NotificationManager.Policy? = null
+  private const val PREFS = "ally_dnd_policy"
+  private const val KEY_HAS = "has_saved"
+  private const val KEY_CATEGORIES = "priorityCategories"
+  private const val KEY_CALL_SENDERS = "priorityCallSenders"
+  private const val KEY_MESSAGE_SENDERS = "priorityMessageSenders"
+  private const val KEY_SUPPRESSED = "suppressedVisualEffects"
+  private const val KEY_CONVERSATION_SENDERS = "priorityConversationSenders"
 
-  private fun rememberPolicy(manager: NotificationManager) {
-    if (savedPolicy == null) {
-      savedPolicy = runCatching { manager.notificationPolicy }.getOrNull()
-    }
+  private fun prefs(context: Context): SharedPreferences =
+    context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+
+  fun hasSavedPolicy(context: Context): Boolean = prefs(context).getBoolean(KEY_HAS, false)
+
+  /** FIRST WRITE WINS: the value from before Ally arrived, never one Ally itself set. */
+  private fun rememberPolicy(context: Context, manager: NotificationManager) {
+    if (hasSavedPolicy(context)) return
+    val p = runCatching { manager.notificationPolicy }.getOrNull() ?: return
+
+    prefs(context).edit()
+      .putInt(KEY_CATEGORIES, p.priorityCategories)
+      .putInt(KEY_CALL_SENDERS, p.priorityCallSenders)
+      .putInt(KEY_MESSAGE_SENDERS, p.priorityMessageSenders)
+      .putInt(KEY_SUPPRESSED, p.suppressedVisualEffects)
+      .putInt(KEY_CONVERSATION_SENDERS, p.priorityConversationSenders)
+      .putBoolean(KEY_HAS, true)
+      .commit()
   }
+
+  /** Rebuilds the stored policy, or null when nothing was ever captured. */
+  private fun recallPolicy(context: Context): NotificationManager.Policy? {
+    if (!hasSavedPolicy(context)) return null
+    val p = prefs(context)
+    return runCatching {
+      NotificationManager.Policy(
+        p.getInt(KEY_CATEGORIES, 0),
+        p.getInt(KEY_CALL_SENDERS, 0),
+        p.getInt(KEY_MESSAGE_SENDERS, 0),
+        p.getInt(KEY_SUPPRESSED, 0),
+        p.getInt(KEY_CONVERSATION_SENDERS, 0),
+      )
+    }.getOrNull()
+  }
+
+  private fun forgetPolicy(context: Context) {
+    prefs(context).edit().clear().commit()
+  }
+
+  private fun fields(p: NotificationManager.Policy): Map<String, Any?> = mapOf(
+    "priorityCategories" to p.priorityCategories,
+    "priorityCallSenders" to p.priorityCallSenders,
+    "priorityMessageSenders" to p.priorityMessageSenders,
+    "suppressedVisualEffects" to p.suppressedVisualEffects,
+    "priorityConversationSenders" to p.priorityConversationSenders,
+  )
 
   private fun describe(p: NotificationManager.Policy?): String? = p?.let {
-    "cat=${'$'}{it.priorityCategories},calls=${'$'}{it.priorityCallSenders},msgs=${'$'}{it.priorityMessageSenders}"
+    "cat=${it.priorityCategories},calls=${it.priorityCallSenders}," +
+      "msgs=${it.priorityMessageSenders},sve=${it.suppressedVisualEffects}," +
+      "conv=${it.priorityConversationSenders}"
   }
 
-  /** Serialized original policy, for durable persistence by the data layer later. */
+  /**
+   * The saved and current policies, all five fields each.
+   *
+   * Raw ints alongside the readable form, so a test or the harness can compare exactly instead
+   * of eyeballing a string.
+   */
   fun policySnapshot(context: Context): Map<String, Any?> {
     val manager = nm(context)
     val current = runCatching { manager.notificationPolicy }.getOrNull()
+    val saved = recallPolicy(context)
     return mapOf(
-      "saved" to describe(savedPolicy),
+      "saved" to describe(saved),
       "current" to describe(current),
-      "hasSaved" to (savedPolicy != null),
+      "hasSaved" to hasSavedPolicy(context),
+      "savedFields" to saved?.let { fields(it) },
+      "currentFields" to current?.let { fields(it) },
     )
+  }
+
+  /**
+   * Puts the user's original notification policy back, and reports whether it did.
+   *
+   * DRIVEN BY THE SAVED POLICY, NOT BY THE TARGET MODE (ADR-120). This used to run only inside
+   * the `mode == "off"` branch of dndApply, so a user who already had Do Not Disturb on before
+   * the context got their mode back and silently kept Ally's policy — the one case where the
+   * borrowed state was never returned. Whether a saved policy exists is the only condition that
+   * matters.
+   */
+  fun restoreSavedPolicy(context: Context): Map<String, Any?> {
+    val manager = nm(context)
+    val saved = recallPolicy(context)
+      ?: return mapOf("ok" to true, "restored" to false, "reason" to "nothing_saved")
+
+    if (!manager.isNotificationPolicyAccessGranted) {
+      // Retained, not cleared: the user can grant access and end the context again.
+      return mapOf("ok" to false, "restored" to false, "reason" to "permission")
+    }
+
+    return try {
+      manager.notificationPolicy = saved
+      Thread.sleep(150)
+      val after = runCatching { manager.notificationPolicy }.getOrNull()
+      val held = after != null && fields(after) == fields(saved)
+
+      // Cleared ONLY on a confirmed restore, so a failure stays retryable with the original
+      // value intact — the same rule the SnapshotStore follows (ADR-117).
+      if (held) forgetPolicy(context)
+
+      mapOf(
+        "ok" to held,
+        "restored" to held,
+        "reason" to if (held) null else "mismatch",
+        "saved" to describe(saved),
+        "after" to describe(after),
+      )
+    } catch (t: Throwable) {
+      mapOf("ok" to false, "restored" to false, "reason" to "error", "message" to t.message)
+    }
   }
 
   /**
@@ -121,7 +231,7 @@ object DndController {
         ),
       )
     }
-    rememberPolicy(manager)
+    rememberPolicy(context, manager)
     return try {
       var categories = 0
       if (allowStarred) categories = categories or NotificationManager.Policy.PRIORITY_CATEGORY_CALLS
@@ -199,7 +309,7 @@ object DndController {
         // WhatsApp is remembered by Ally, never enforced here. Stated so callers cannot
         // mistake the absence of an error for enforcement.
         "whatsappEnforceable" to false,
-        "savedOriginal" to describe(savedPolicy),
+        "savedOriginal" to describe(recallPolicy(context)),
         "message" to if (ok) {
           "Starred contacts" + (if (allowMessages) " (calls and messages)" else " (calls)") +
             " and repeat callers can reach you."
@@ -209,14 +319,6 @@ object DndController {
       )
     } catch (t: Throwable) {
       mapOf("ok" to false, "reason" to "error", "message" to (t.message ?: "Priority caller change failed."))
-    }
-  }
-
-  /** Puts the user's original notification policy back. Called when a context ends. */
-  private fun restorePolicy(manager: NotificationManager) {
-    savedPolicy?.let {
-      runCatching { manager.notificationPolicy = it }
-      savedPolicy = null
     }
   }
 
@@ -355,9 +457,11 @@ object DndController {
       val existingId = findOurRuleId(manager)
 
       if (mode == "off") {
-        // Ending the context gives back BOTH pieces of borrowed state: the interruption
-        // filter and the notification policy we changed to express priority callers.
-        restorePolicy(manager)
+        // The notification policy is NOT restored here any more. Tying it to mode == "off"
+        // meant a user who already had Do Not Disturb on kept Ally's policy forever
+        // (ADR-120); restoreSavedPolicy() is now called explicitly by the capability's
+        // restore path, whatever mode it is returning to.
+        //
         // Deactivate our rule rather than forcing the filter. Anything else the user has
         // running stays in charge, which is what makes this reversible.
         existingId?.let {

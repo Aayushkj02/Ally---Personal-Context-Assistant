@@ -137,6 +137,12 @@ class AllyNativeModule : Module() {
     /** The user's original notification policy, for durable persistence by the data layer. */
     Function("dndPolicySnapshot") { DndController.policySnapshot(context) }
 
+    // Restores the user's original NotificationManager.Policy from durable storage. Driven by
+    // whether a policy was saved, never by the DND mode being returned to (ADR-120).
+    Function("dndRestorePolicy") { DndController.restoreSavedPolicy(context) }
+
+    Function("dndHasSavedPolicy") { DndController.hasSavedPolicy(context) }
+
     // ---- Brightness (T4) ----
 
     Function("brightnessIsAvailable") { BrightnessController.isAvailable(context) }
