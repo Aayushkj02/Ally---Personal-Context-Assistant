@@ -28,5 +28,12 @@ export type {
   EndContextResult,
   EndContextOptions,
 } from './ContextCoordinator';
+export { evaluateEmergency, describeEmergency } from './EmergencyMonitor';
+export type {
+  EmergencyStatus,
+  EmergencyCaller,
+  EmergencyDeps,
+  CallLogAnalyser,
+} from './EmergencyMonitor';
 export { summarisePlan, summariseRestore } from './summaries';
 export type { PlanSummary, RestoreSummary } from './summaries';

@@ -620,3 +620,84 @@ confirmed the restore, so a failed restore keeps the original for a retry.
 `describe()` was emitting Kotlin's escaped-dollar literal (`${'$'}{it.priorityCategories}`) rather
 than the value, so every previous policy log line was meaningless text. Debug output only, never
 behaviour. Fixed while adding the raw-int fields to `policySnapshot()`.
+
+---
+
+## Phase 2 gate — full vertical slice (2026-08-31, SM-S928B, Android 16 / API 36)
+
+One sentence, the real pipeline, no fixture plan and no Study policy inside the Aayush layer:
+
+```
+"I'm going to study for two hours."
+  → FallbackParser + IntentValidator (Shlok)      command_log: confidence 0.85, source fallback
+  → loadProfileContext + resolve() (Dhrey)
+  → buildActionPlan()                             session sess_mth4ief6_51tq2y93 / profile_study
+  → startContext() (Aayush)
+  → executePlan() → DND + brightness capabilities
+  → SM-S928B
+```
+
+Everything below was read with `adb shell settings` / `dumpsys notification`, independently of
+anything the app reported.
+
+| Stage | brightness | mode | zen | priorityCategories |
+|---|---|---|---|---|
+| Before | **187** | 0 | 0 | `ALARMS, MEDIA` |
+| Context active | 102 (40%) | 0 | 1 | `ALARMS, REPEAT_CALLERS` |
+| After `am force-stop` (17164 → 18095) | 102 | 0 | 1 | `ALARMS, REPEAT_CALLERS` |
+| **After End study** | **187** | **0** | **0** | **`ALARMS, MEDIA`** |
+
+Afterwards: `device_snapshot` 0 rows, session `IDLE`, `ally_dnd_policy.xml` = `<map />`, UI back on
+the harness with DND showing `off`. A second full cycle immediately afterwards restored identically.
+
+### The Active Context screen across a process death
+
+The screen reads the session from SQLite on every visit, so on the **fresh process** it still
+showed `study · Active · 117:43 left` — the countdown continuing against the real `endsAt`, on a
+process that had applied nothing. It reported `0/0 changes applied` and "Nothing yet" rather than
+inventing results it never saw: execution results are display-only in-memory state, and the durable
+truth is the session row plus the snapshots. Ending from that screen restored the device exactly.
+
+### Execution status, as rendered
+
+From the same run, all in one view and none of them rounded:
+
+| Row | Shown as |
+|---|---|
+| dnd `off → priority` | **Applied** (green) |
+| brightness `73 → 40` | **Applied** (green) |
+| ringer `null → null` | **Not supported on this device** (grey — *not* red, *not* "Failed") |
+| whatsapp | **Remembered, not enforced** (amber) |
+| calls / sms (no contacts listed) | **Not supported on this device** — "Priority calls were not requested." |
+
+Headline: `2/3 changes applied · session active`, state **Active**. The plan was PARTIAL in the
+A-V7 run where the ringer was the only shortfall; here DND and brightness both applied and the
+screen says so without claiming the ringer worked.
+
+### Emergency detection
+
+Run through the integrated path (`evaluateEmergency` → `describeEmergency` → Active Context), not
+the old debug button. With no inbound calls in the window the screen reported:
+
+> No caller has reached 4 calls in 10 minutes. No inbound calls.
+
+- **Ally detection: PASS** — the real `CallLogAnalyzer` ran against the real call log and reported
+  the negative case correctly, stating its own threshold and window.
+- **Positive case (4+ calls): NOT TESTED on hardware.** Manufacturing four inbound calls needs a
+  second handset. The rule is covered by the Kotlin JVM tests and by TypeScript integration tests
+  driving the analyzer's exact payload shape.
+- **Actual ringing: PLATFORM-CONTROLLED.** Android's repeat-caller bypass uses a 15-minute window
+  Ally does not set. Ally detects; Android decides (ADR-109, ADR-122).
+
+### Priority regression
+
+Calls and SMS remain enforceable and WhatsApp remains `preference_only` — verified in the same run
+(see the table above). In the A-V7 run with "Mom" on Calls only, the consolidated policy gained
+`CALLS` and correctly did **not** gain `MESSAGES`. Emergency detection ran during an active context
+and added nobody to Priority: `priority_preference` was unchanged and no snapshot was written.
+
+### Build gotcha worth remembering before the demo
+
+`expo run:android` with an emulator attached built an **x86_64-only** APK, which then failed on the
+phone with `INSTALL_FAILED_NO_MATCHING_ABIS`. Kill the emulator first, or the phone silently keeps
+running the previous build.

@@ -307,6 +307,21 @@ started must not rewrite the user's notification policy. The result comes back a
 plan's status: "the context is active" and "your WhatsApp preference is remembered but Android
 will not act on it" are different facts and the user needs both.
 
+**Emergency detection is a reader on the same lifecycle** (ADR-122). `evaluateEmergency()` wraps
+the existing `CallLogAnalyzer` — same caller, 4+ calls, rolling 10 minutes, all of it still in
+Kotlin — and is called on demand from the Active Context screen. It writes nothing, adds nobody to
+Priority, and never touches a snapshot: a detection is an observation, not a change. An unreadable
+call log comes back `ok: false` with a reason rather than `detected: false`, because "we could not
+look" is not "nobody called". Ally reports the condition; Android decides whether the call rings.
+
+**Where the user sees all this** (ADR-121). `startContext()` leads to an Active Context screen
+showing the mode, ACTIVE vs PARTIAL, the remaining time, every action in its own truthful status,
+who can still reach the user, and the way out. The session is re-read from the database on every
+visit, so the screen is correct on a process that never applied anything — which is the same
+reason `endContext()` needs only a sessionId. Every status renders through `STATUS_PRESENTATION`
+or `ENFORCEMENT_PRESENTATION`, so no screen can round `not_supported` up to a failure or `PARTIAL`
+up to a success.
+
 
 **Snapshots are retained unless the restore was clean.** `restoreSession()` never deletes
 anything — that is a database write this layer must not perform, and the rows *are* the retry.

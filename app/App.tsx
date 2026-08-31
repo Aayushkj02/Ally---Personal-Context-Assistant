@@ -22,6 +22,8 @@ import {
   analyseCallLog,
 } from './src/native';
 import { PriorityScreen } from './src/screens';
+import { evaluateEmergency, type ContextState, type EmergencyStatus } from './src/actions';
+import type { ChannelEnforcement, ContextSession } from './src/types';
 import {
   startContext,
   endContext as endContextLifecycle,
@@ -29,6 +31,8 @@ import {
   type LifecycleHooks,
 } from './src/actions';
 import { activateFromText } from './src/services/contextOrchestrator';
+import { useRoute } from './src/navigation';
+import { ActiveContextScreen } from './src/screens';
 import { applyPriorityForActivity } from './src/services/priorityIntegration';
 import { ensureSeeded, getActiveContext, markSessionActive, endSession } from './src/memory';
 
@@ -79,10 +83,45 @@ function channelRows(r: {
   };
 }
 
+/**
+ * A-V9. The app shell: a route, a live view of whatever context is running, and the harness.
+ *
+ * The active context is read from the DATABASE on every visit, never from React state, so the
+ * screen is correct after a process death — which is the same reason endContext() takes only a
+ * sessionId. Execution results are held here only for as long as they are being displayed;
+ * the durable record is Dhrey's session row and the snapshots.
+ */
 export default function App() {
-  const [showPriority, setShowPriority] = useState(false);
+  const { route, navigate, home } = useRoute();
 
-  if (showPriority) {
+  const [session, setSession] = useState<ContextSession | null>(null);
+  const [label, setLabel] = useState('Context');
+  const [state, setState] = useState<ContextState>('READY');
+  const [results, setResults] = useState<ActionResult[]>([]);
+  const [priority, setPriority] = useState<ChannelEnforcement[] | null>(null);
+  const [emergency, setEmergency] = useState<EmergencyStatus | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  /** Re-reads whatever context is genuinely running. The DB is the source of truth. */
+  const refreshContext = useCallback(async () => {
+    try {
+      await ensureSeeded();
+      const active = await getActiveContext();
+      setSession(active?.session ?? null);
+      if (active) {
+        setLabel(active.session.profileId.replace(/^profile_/, '') || 'Context');
+        setState(active.session.status === 'ACTIVE' ? 'ACTIVE' : 'READY');
+      }
+    } catch {
+      setSession(null);
+    }
+  }, []);
+
+  useEffect(() => {
+    void refreshContext();
+  }, [refreshContext]);
+
+  if (route === 'priority') {
     return (
       <View style={{ flex: 1 }}>
         <PriorityScreen
@@ -95,17 +134,86 @@ export default function App() {
             return r?.channels ?? null;
           }}
         />
-        <Pressable style={styles.backBtn} onPress={() => setShowPriority(false)}>
+        <Pressable style={styles.backBtn} onPress={home}>
           <Text style={styles.btnText}>Back to device harness</Text>
         </Pressable>
       </View>
     );
   }
 
-  return <DeviceHarness onOpenPriority={() => setShowPriority(true)} />;
+  if (route === 'activeContext') {
+    return (
+      <ActiveContextScreen
+        session={session}
+        label={label}
+        state={state}
+        results={results}
+        priority={priority}
+        emergency={emergency}
+        busy={busy}
+        onCheckEmergency={() =>
+          setEmergency(
+            evaluateEmergency({ analyse: analyseCallLog, sessionId: session?.id ?? null }),
+          )
+        }
+        onEnd={async () => {
+          if (!session) return;
+          setBusy(true);
+          try {
+            const snapshots = createRepositorySnapshotStore();
+            const r = await endContextLifecycle(session.id, {
+              registry: device,
+              snapshots,
+              hooks: sessionHooks,
+            });
+            setResults(r.results);
+            setState(r.state);
+            setPriority(null);
+            setEmergency(null);
+            await refreshContext();
+            // A clean restore means no context is running any more; leave the screen so the
+            // user is not looking at something that no longer exists.
+            if (r.state === 'IDLE') home();
+          } finally {
+            setBusy(false);
+          }
+        }}
+        onBack={home}
+      />
+    );
+  }
+
+  return (
+    <DeviceHarness
+      onOpenPriority={() => navigate('priority')}
+      onOpenActive={() => {
+        void refreshContext();
+        navigate('activeContext');
+      }}
+      onStarted={(next) => {
+        setState(next.state);
+        setResults(next.results);
+        setPriority(next.priority);
+        setEmergency(null);
+        void refreshContext();
+      }}
+    />
+  );
 }
 
-function DeviceHarness({ onOpenPriority }: { onOpenPriority: () => void }) {
+function DeviceHarness({
+  onOpenPriority,
+  onOpenActive,
+  onStarted,
+}: {
+  onOpenPriority: () => void;
+  onOpenActive: () => void;
+  onStarted: (r: {
+    state: ContextState;
+    results: ActionResult[];
+    priority: ChannelEnforcement[] | null;
+  }) => void;
+}) {
   const info = getNativeDeviceInfo();
   const dnd = device.get('dnd');
 
@@ -185,6 +293,10 @@ function DeviceHarness({ onOpenPriority }: { onOpenPriority: () => void }) {
           if (e.phase !== 'pending') phases.push(`${e.capability}:${e.phase}`);
         },
       });
+
+      // A-V9: hand the outcome to the shell so the Active Context screen shows the real thing
+      // rather than recomputing it. The shell holds it for display only.
+      onStarted({ state, results, priority });
 
       setLog(results.slice().reverse());
       setProbe({
@@ -311,6 +423,9 @@ function DeviceHarness({ onOpenPriority }: { onOpenPriority: () => void }) {
       </Pressable>
       <Pressable style={[styles.btn, styles.btnProbe]} onPress={() => void onEndContext()}>
         <Text style={styles.btnText}>End context (restore)</Text>
+      </Pressable>
+      <Pressable style={[styles.btn, styles.btnProbe]} onPress={onOpenActive}>
+        <Text style={styles.btnText}>Open Active Context</Text>
       </Pressable>
       <Text style={styles.info}>
         End context reads the session from the database, so it still works after the app has been
