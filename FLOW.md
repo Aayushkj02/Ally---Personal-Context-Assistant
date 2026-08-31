@@ -290,6 +290,16 @@ and that cost an afternoon on the device: the harness wires it to `endSession()`
 apply immediately ended the session it had just started and the next `endContext()` reported "no
 active context to end". A partial apply is already fully described by `onActivated(id, 'PARTIAL')`.
 
+**Priority rides the lifecycle, but is not in the plan** (ADR-119). Who may still reach the user
+is resolved by Dhrey's `applyPriorityForContext()` and sent to Android by
+`applyPriorityPreferences()`; `startContext()` takes that as an injected thunk and only decides
+WHEN — after the plan, and never when the plan applied nothing, because a context that never
+started must not rewrite the user's notification policy. The result comes back as
+`ChannelEnforcement[]` in its own four-state vocabulary and is deliberately NOT folded into the
+plan's status: "the context is active" and "your WhatsApp preference is remembered but Android
+will not act on it" are different facts and the user needs both.
+
+
 **Snapshots are retained unless the restore was clean.** `restoreSession()` never deletes
 anything — that is a database write this layer must not perform, and the rows *are* the retry.
 The caller reads `summariseRestore().safeToClear` and calls `SnapshotStore.clear()` only on a

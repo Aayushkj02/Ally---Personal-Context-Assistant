@@ -510,3 +510,39 @@ Afterwards `device_snapshot` held **0 rows** and the session was `IDLE`.
 still a heap field. It is not part of any `ActionPlan`, so no A-V2 path depends on it, but a
 priority context that outlives its process cannot put the user's policy back. Same class of bug
 as ADR-116, different capability. Fix it when priority gets a restore path.
+
+---
+
+## A-V7 — priority applied by the context lifecycle (2026-08-31, SM-S928B, Android 16 / API 36)
+
+"Mom" added to **Calls only** through the Priority screen, then the real sentence run. Policy read
+with `adb shell dumpsys notification`, independently of the app.
+
+| Stage | `zen_mode` | brightness | `mConsolidatedPolicy` priorityCategories |
+|---|---|---|---|
+| Before | 0 | 44 | `ALARMS, MEDIA` |
+| Context active | 1 | 102 | `ALARMS, CALLS, REPEAT_CALLERS` |
+| After `endContext()` | 0 | **44** | `ALARMS, MEDIA` |
+
+`CALLS` appears because Mom is a calls contact; **`MESSAGES` is correctly absent** because no SMS
+contact was listed — the delta proves the policy came from the user's stored preferences and not
+from a blanket "turn everything on". `REPEAT_CALLERS` is unconditional (the emergency bypass), and
+`priorityCallSenders=PRIORITY_SENDERS_STARRED` is the starring requirement Android forces.
+
+Coordinator report, alongside a `PARTIAL` plan:
+
+```
+priority calls:    enforced        — Starred contacts can call you.
+priority sms:      unsupported     — Priority messages were not requested.
+priority whatsapp: preference_only — Ally remembers this. Android cannot let Ally control WhatsApp notifications.
+```
+
+Also confirmed: the priority row persisted with `profileId = profile_study`, not the bare mode key.
+
+### The notification policy restores IN-PROCESS only
+
+Ending the context restored `ALARMS,MEDIA` because `dndApply("off")` calls `restorePolicy()`.
+That path depends on `DndController.savedPolicy`, which is still a **heap field**. Observed
+directly this session: a policy applied before an earlier process death was still on the device
+afterwards, with no saved copy left to restore it from. Same class as ADR-116, not yet fixed for
+the policy. A context whose process dies cannot put the user's notification policy back.
