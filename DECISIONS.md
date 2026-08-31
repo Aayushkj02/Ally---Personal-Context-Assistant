@@ -775,3 +775,48 @@ Because entries never move and IDs never collide, a merge conflict here is alway
   adding that I found `describe()` had been emitting Kotlin's escaped-dollar literal
   (`${'$'}{it.priorityCategories}`) instead of the value, making every previous policy log
   meaningless. Fixed in passing; it affected debug output only, never behaviour.
+
+### ADR-121 — Phase 2 navigates with a route switch, not React Navigation
+- **Date:** 2026-08-31 · **Author:** Aayush · **Phase:** 2 · **Status:** Accepted
+- **Decision:** `src/navigation/` exposes a `Route` union and a `useRoute()` hook. No
+  `@react-navigation` dependency. Route is local UI state and is deliberately not put in Dhrey's
+  store.
+- **Reason:** The Phase 0 comment planned a React Navigation stack, and Phase 2 turned out not to
+  need one: three destinations, no nested stacks, no gestures, no deep-link parameters, no header
+  chrome. Adding `@react-navigation/native` plus its `react-native-screens`,
+  `react-native-safe-area-context` and gesture-handler peers means new NATIVE dependencies and a
+  rebuild — at a point where `npm install` already needs `--ignore-scripts` on this machine, and
+  where a wrong ABI silently produced an APK that would not install. That is real risk bought for
+  a surface a union type covers. Route stays out of the shared store because which screen is on
+  top is not a fact about the session; a copy there would disagree the first time a screen changed
+  without a session changing.
+- **Alternatives considered:** Add React Navigation now — correct eventually, wrong this week.
+  Keep the boolean flags the harness had — they were already two, would have become three, and
+  each new screen would have added another mutually-exclusive flag nobody could see the invariant
+  for. Put the route in Dhrey's `useStore` — a second source of truth for something the UI owns.
+- **Impact:** Everything above navigates through `useRoute()`, never a library type, so swapping in
+  a real stack in Phase 3 changes this one file and no screens.
+
+### ADR-122 — Emergency detection is integrated as a reader, never as an actor
+- **Date:** 2026-08-31 · **Author:** Aayush · **Phase:** 2 · **Status:** Accepted
+- **Decision:** `EmergencyMonitor` wraps the existing `CallLogAnalyzer` in a typed seam and is
+  called on demand from the Active Context screen. It does not implement the rule, does not write
+  anything, and does not act. `detected` and `qualifies` are taken from the analyzer's own output
+  rather than recomputed from `count`. An unreadable call log returns `ok: false` with a reason.
+- **Reason:** The rule — same caller, 4+ calls, rolling 10 minutes — lives in Kotlin where it is
+  tested against the real call-log projection, and duplicating it in TypeScript would give the
+  product two answers to the same question, with the user seeing the one nobody tested. Not acting
+  matters as much: adding the caller to Priority would create a durable preference the user never
+  made, and touching a `DeviceSnapshot` would corrupt the value restore depends on. A detection is
+  an observation about the last ten minutes, not a change to the phone. And `ok: false` is kept
+  distinct from `detected: false` because "we could not look" and "we looked and nobody called"
+  are different answers; collapsing them would report a denied permission as an all-clear.
+- **Alternatives considered:** Re-implement the window in TypeScript so it is testable in jest —
+  two sources of truth for the product's one safety rule. Auto-add qualifying callers to Priority
+  — silently rewrites the user's standing preferences from a transient signal. Poll in the
+  background — an always-on service, which NFR-09 rules out.
+- **Impact:** Ally reports that someone has been calling repeatedly; ANDROID decides whether that
+  rings, through its own repeat-caller bypass on a 15-minute window we do not set (ADR-109). The
+  UI copy says exactly that. Verified on device: with no inbound calls the screen reported "No
+  caller has reached 4 calls in 10 minutes." The positive case needs a second handset and is NOT
+  yet tested on hardware.
