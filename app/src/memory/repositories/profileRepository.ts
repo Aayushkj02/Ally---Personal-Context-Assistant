@@ -75,7 +75,14 @@ export const profileRepository = {
   async createPreference(pref: Preference): Promise<void> {
     const db = await getDatabase();
     await db.runAsync(
-      'INSERT INTO preference (id, profileId, capability, value, source, sourceCommand, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      `INSERT INTO preference (id, profileId, capability, value, source, sourceCommand, createdAt)
+       VALUES (?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT (profileId, capability)
+       DO UPDATE SET
+         value = excluded.value,
+         source = excluded.source,
+         sourceCommand = excluded.sourceCommand,
+         createdAt = excluded.createdAt`,
       [
         pref.id,
         pref.profileId,
@@ -91,7 +98,7 @@ export const profileRepository = {
   async getPreferencesByProfile(profileId: string): Promise<Preference[]> {
     const db = await getDatabase();
     const rows = await db.getAllAsync<any>(
-      'SELECT id, profileId, capability, value, source, sourceCommand, createdAt FROM preference WHERE profileId = ?',
+      'SELECT id, profileId, capability, value, source, sourceCommand, createdAt FROM preference WHERE profileId = ? ORDER BY createdAt ASC, rowid ASC',
       [profileId],
     );
     return rows.map((r) => ({
