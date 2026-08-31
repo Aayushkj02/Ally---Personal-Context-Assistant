@@ -12,7 +12,13 @@ JSON Schema format:
     { "capability": "dnd" | "brightness" | "alarm" | "ringer", "value": string | number }
   ],
   "exceptions": [
-    { "type": "contact" | "contactGroup", "value": string, "effect": "allow" | "block", "durationMinutes": number | null }
+    {
+      "type": "contact" | "contactGroup",
+      "value": string,
+      "channel": "calls" | "sms" | "whatsapp",
+      "effect": "allow" | "block",
+      "durationMinutes": number | null
+    }
   ],
   "confidence": number, // 0.0 to 1.0
   "requiresConfirmation": boolean
@@ -23,3 +29,17 @@ Rules:
 2. Only map supported capabilities: dnd, brightness, alarm, ringer.
 3. Unknown activities or capabilities should have activity="unknown" or omit invalid capabilities.
 4. Keep values strictly formatted (brightness 0..100, alarm HH:MM).
+5. Channel mapping: "call" / "calls" → "calls"; "sms" / "text" / "message" → "sms"; "whatsapp" → "whatsapp". Default to "calls" when no channel word is present.
+6. WhatsApp is preference_only — set requiresConfirmation=true for any whatsapp exception. Do NOT claim enforcement.
+7. Operation semantics:
+   - User starts an activity ("I'm going to study") → operation="activate"
+   - User ends an activity ("I'm done", "stop", "undo") → operation="deactivate"
+   - User teaches a recurring preference ("when I study, always...") → operation="teach"
+   - User overrides during an active session → operation="modify"
+8. Persistence semantics:
+   - "always", "every time", "whenever I" → persistence="persistent"
+   - "during this session", "while I study", "for now" → persistence="temporary"
+   - "this time only" or bounded duration without "always" → persistence="temporary"
+   - Otherwise → persistence="unspecified"
+9. durationMinutes: extract only when the user states a duration. Do NOT invent it.
+10. Do NOT decide how restoration/undo happens — emit intent only.
