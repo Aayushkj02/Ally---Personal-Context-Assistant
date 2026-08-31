@@ -8,6 +8,7 @@
 import * as SQLite from 'expo-sqlite';
 import { up as initialSchema } from './001_initial_schema';
 import { up as priorityPreference } from './002_priority_preference';
+import { up as snapshotFirstWriteWins } from './003_snapshot_first_write_wins';
 
 export async function runMigrations(db: SQLite.SQLiteDatabase): Promise<void> {
   await db.execAsync(`
@@ -18,24 +19,23 @@ export async function runMigrations(db: SQLite.SQLiteDatabase): Promise<void> {
     );
   `);
 
-  const appliedMigrations = await db.getAllAsync<{ name: string }>(
-    'SELECT name FROM migrations'
-  );
+  const appliedMigrations = await db.getAllAsync<{ name: string }>('SELECT name FROM migrations');
   const appliedNames = new Set(appliedMigrations.map((m) => m.name));
 
   const migrations = [
     { name: '001_initial_schema', up: initialSchema },
     { name: '002_priority_preference', up: priorityPreference },
+    { name: '003_snapshot_first_write_wins', up: snapshotFirstWriteWins },
   ];
 
   for (const migration of migrations) {
     if (!appliedNames.has(migration.name)) {
       console.log(`Applying migration: ${migration.name}`);
       await migration.up(db);
-      await db.runAsync(
-        'INSERT INTO migrations (name, executedAt) VALUES (?, ?)',
-        [migration.name, Date.now()]
-      );
+      await db.runAsync('INSERT INTO migrations (name, executedAt) VALUES (?, ?)', [
+        migration.name,
+        Date.now(),
+      ]);
     }
   }
 }
