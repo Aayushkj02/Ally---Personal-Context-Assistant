@@ -26,5 +26,5 @@ export const typography = {
     bodyMedium: { fontSize: 16, fontWeight: '500' as const, lineHeight: 24 },
     caption: { fontSize: 14, fontWeight: '400' as const, lineHeight: 20 },
     micro: { fontSize: 12, fontWeight: '500' as const, lineHeight: 16 },
-  }
+  },
 };

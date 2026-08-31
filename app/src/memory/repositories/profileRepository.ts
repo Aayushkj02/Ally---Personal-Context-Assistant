@@ -14,7 +14,7 @@ export const profileRepository = {
     const db = await getDatabase();
     await db.runAsync(
       'INSERT INTO context_profile (id, name, modeKey, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?)',
-      [profile.id, profile.name, profile.modeKey, profile.createdAt, profile.updatedAt]
+      [profile.id, profile.name, profile.modeKey, profile.createdAt, profile.updatedAt],
     );
   },
 
@@ -22,7 +22,7 @@ export const profileRepository = {
     const db = await getDatabase();
     const row = await db.getFirstAsync<ContextProfile>(
       'SELECT id, name, modeKey, createdAt, updatedAt FROM context_profile WHERE id = ?',
-      [id]
+      [id],
     );
     return row || null;
   },
@@ -31,7 +31,7 @@ export const profileRepository = {
     const db = await getDatabase();
     const row = await db.getFirstAsync<ContextProfile>(
       'SELECT id, name, modeKey, createdAt, updatedAt FROM context_profile WHERE name = ?',
-      [name]
+      [name],
     );
     return row || null;
   },
@@ -47,21 +47,23 @@ export const profileRepository = {
     const db = await getDatabase();
     const row = await db.getFirstAsync<ContextProfile>(
       'SELECT id, name, modeKey, createdAt, updatedAt FROM context_profile WHERE modeKey = ?',
-      [modeKey]
+      [modeKey],
     );
     return row || null;
   },
 
   async listProfiles(): Promise<ContextProfile[]> {
     const db = await getDatabase();
-    return await db.getAllAsync<ContextProfile>('SELECT id, name, modeKey, createdAt, updatedAt FROM context_profile');
+    return await db.getAllAsync<ContextProfile>(
+      'SELECT id, name, modeKey, createdAt, updatedAt FROM context_profile',
+    );
   },
 
   async updateProfile(profile: ContextProfile): Promise<void> {
     const db = await getDatabase();
     await db.runAsync(
       'UPDATE context_profile SET name = ?, modeKey = ?, updatedAt = ? WHERE id = ?',
-      [profile.name, profile.modeKey, profile.updatedAt, profile.id]
+      [profile.name, profile.modeKey, profile.updatedAt, profile.id],
     );
   },
 
@@ -74,7 +76,15 @@ export const profileRepository = {
     const db = await getDatabase();
     await db.runAsync(
       'INSERT INTO preference (id, profileId, capability, value, source, sourceCommand, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?)',
-      [pref.id, pref.profileId, pref.capability, encodeValue(pref.value), pref.source, pref.sourceCommand, pref.createdAt]
+      [
+        pref.id,
+        pref.profileId,
+        pref.capability,
+        encodeValue(pref.value),
+        pref.source,
+        pref.sourceCommand,
+        pref.createdAt,
+      ],
     );
   },
 
@@ -82,7 +92,7 @@ export const profileRepository = {
     const db = await getDatabase();
     const rows = await db.getAllAsync<any>(
       'SELECT id, profileId, capability, value, source, sourceCommand, createdAt FROM preference WHERE profileId = ?',
-      [profileId]
+      [profileId],
     );
     return rows.map((r) => ({
       ...r,
@@ -94,12 +104,12 @@ export const profileRepository = {
     const db = await getDatabase();
     await db.runAsync(
       'UPDATE preference SET capability = ?, value = ?, source = ?, sourceCommand = ? WHERE id = ?',
-      [pref.capability, encodeValue(pref.value), pref.source, pref.sourceCommand, pref.id]
+      [pref.capability, encodeValue(pref.value), pref.source, pref.sourceCommand, pref.id],
     );
   },
 
   async deletePreference(id: string): Promise<void> {
     const db = await getDatabase();
     await db.runAsync('DELETE FROM preference WHERE id = ?', [id]);
-  }
+  },
 };

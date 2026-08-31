@@ -508,3 +508,185 @@ Because entries never move and IDs never collide, a merge conflict here is alway
   hard-coded for WhatsApp and cannot be reached by a successful device call. The permission and
   unsupported paths carry the same breakdown, so a caller never has to guess which channels were
   affected by a failure.
+
+### ADR-301 — Priority preferences are stored per contact, applied per scope
+- **Date:** 2026-08-30 · **Author:** Dhrey · **Phase:** 1 · **Status:** Accepted
+- **Decision:** `priority_preference` stores one row per (mode, channel, subject). The policy
+  resolver reduces those rows to a per-channel boolean for the device layer and separately
+  returns the named subjects and a `requiresStarring` list for the UI.
+- **Reason:** The user thinks per person — "let Mom call me during Sleep". Android thinks per
+  scope — starred contacts, all contacts, or anyone — and offers no per-individual-contact DND
+  exception to apps (ADR-111). Storing only a boolean would throw away the user's actual intent
+  and make the Memory screen's provenance impossible. Storing per contact and reducing at the
+  boundary keeps the intent intact and puts the lossy step in exactly one place, where it can be
+  explained on screen.
+- **Alternatives considered:** Store a per-channel boolean — loses who the user named, so we
+  could never tell them which contacts to star. Store per contact and pretend Android honours
+  it — the false-success this project keeps designing against.
+- **Impact:** The screen renders a per-contact list and, for enforceable channels, tells the
+  user which of those people must be **starred in Contacts** or they will still be silenced.
+  That sentence is the difference between a demo that works and one that mysteriously does not.
+
+### ADR-302 — The screen keeps no copy of the data
+- **Date:** 2026-08-30 · **Author:** Dhrey · **Phase:** 1 · **Status:** Accepted
+- **Decision:** `PriorityScreen` reads and writes exclusively through `priorityRepository` and
+  re-reads after every mutation. The Zustand store holds only UI state — the selected mode and
+  the last enforcement result. `enforceable` is set by the repository from
+  `CHANNEL_ENFORCEABLE`, never passed in by a caller.
+- **Reason:** Two sources of truth is how a preference screen ends up showing a tick for
+  something that was never saved. Having the repository own `enforceable` means no screen can
+  accidentally mark WhatsApp as enforced by passing the wrong flag — the honest answer is
+  structural rather than a matter of remembering.
+- **Alternatives considered:** Mirror preferences in the store for snappier rendering — a
+  second storage model, explicitly forbidden, and the lists are small enough that re-reading is
+  imperceptible.
+- **Impact:** The screen takes `onApply` as a prop rather than importing the native layer, so
+  it never crosses into Aayush's boundary and is testable without a device. `UNIQUE(profile_id,
+  channel, subject)` with an upsert makes re-adding someone idempotent instead of duplicating.
+### ADR-114 — The action engine records snapshots through a port, not a repository call
+- **Date:** 2026-08-31 · **Author:** Aayush · **Phase:** 2 · **Status:** Accepted
+- **Decision:** `executePlan()` writes pre-change values through a `SnapshotStore` interface in
+  `app/src/actions/SnapshotStore.ts`, carrying the frozen `DeviceSnapshot` row. Dhrey's existing
+  `snapshotRepository` is wired in by `snapshotStoreAdapter.ts`, which is the only file in the
+  action engine that knows a database exists and is NOT imported by the executor. `save()` is
+  idempotent per `(sessionId, capability)` and the FIRST value written wins.
+- **Reason:** Two constraints meet here. `device_snapshot` is Dhrey's table, and an executor that
+  called the repository directly would put two owners in one code path and make every executor
+  test need SQLite. A port satisfies both while creating no second table, no second row type and
+  no second persistence mechanism — the repository is used exactly as published.
+  First-write-wins is not a tie-breaker: re-snapshotting a capability mid-session replaces the
+  user's original value with one Ally itself set, and restore then puts back Ally's own change.
+  That is the bug ADR-110 records, expressed as a key collision so it cannot recur — the row id
+  is `sessionId:capability`, which is the table's PRIMARY KEY.
+- **Alternatives considered:** Call `snapshotRepository` from the executor — crosses the ownership
+  boundary and drags SQLite into every unit test. Return snapshots from `executePlan()` and let
+  the caller persist them — the caller can forget, and a plan that dies mid-run loses everything
+  already applied. Keep them in module state — untestable and unclearable.
+- **Impact:** Verified on device: a Study run wrote `dnd → "off"` and `brightness → 73` into
+  `device_snapshot`, and `ringer` correctly produced no row because the action never ran. Capture
+  is done; nothing READS these back yet. Restoration is A-V2/Phase 3 and is not claimed here.
+
+### ADR-115 — The executor is handed a device; plan-level state reuses `SessionState`
+- **Date:** 2026-08-31 · **Author:** Aayush · **Phase:** 2 · **Status:** Accepted
+- **Decision:** Three rules for `executePlan(plan, deps)`. First, `deps.registry` is a REQUIRED
+  `DeviceRegistry` — the executor never imports `src/native` and never reaches for the phone
+  itself. Second, progress is reported through an optional `onProgress` callback carrying
+  `pending | running | settled`, and those phases are deliberately NOT added to the frozen
+  `ACTION_STATUSES`. Third, `summarisePlan()` reports the plan-level answer as
+  `ACTIVE | PARTIAL | ERROR` — the existing `SessionState` values — rather than a vocabulary of
+  its own. A capability's `requiredPermissions()` is the authority for the permission gate;
+  `PlannedAction.requiredPermission` is a policy-time hint, cross-checked and surfaced as
+  `declaredPermissionMismatch` on the progress channel.
+- **Reason:** A required registry is what makes `mockRegistry` and the Kotlin-backed registry
+  genuinely interchangeable (ADR-007) — the seam is a parameter, so nothing can quietly bypass it.
+  On progress: `applied`/`failed` describe what happened to the phone and are persisted and shown
+  to the user; `pending`/`running` describe where the walk is. Merging them would let a row be
+  stored as "running" forever if the app died mid-plan. On the plan-level state:
+  `src/memory/session.ts` already says a session starts READY and "the executor moves it to ACTIVE
+  once actions are applied", and `endSession()` already takes PARTIAL — so inventing
+  `all_applied | partial | none_applied` would have been a third vocabulary for a question the
+  codebase had already answered. On permissions, only the capability can see whether the user has
+  actually granted anything, but silently preferring one source hides real drift between policy
+  and device, so the disagreement is reported without changing the verdict.
+- **Alternatives considered:** Default `registry` to the `device` singleton — convenient, but
+  importing `src/native` pulls the Expo module resolver into every Node test. Extend
+  `ACTION_STATUSES` with `pending`/`running` — a frozen-contract change (ADR-006) to express
+  something no `ActionResult` should ever hold. Have the executor call `markSessionActive()`
+  itself — that is a database write, which this layer must not perform.
+- **Impact:** `executePlan` runs actions strictly in `plan.actions` order, one at a time, and
+  returns exactly one `ActionResult` per `PlannedAction`; a failure never aborts the plan.
+  `summarisePlan()` returns a state the caller can hand straight to the session layer. Ordering is
+  Dhrey's guarantee per docs/CONTRACTS.md §2, so the executor never reorders — for the Study plan
+  the three actions are independent and order is irrelevant, but no flag distinguishes that case
+  from one where it matters.
+
+### ADR-116 — The exact brightness snapshot lives on disk, not in the heap
+- **Date:** 2026-08-31 · **Author:** Aayush · **Phase:** 2 · **Status:** Accepted
+- **Decision:** `BrightnessController` persists the exact raw `SCREEN_BRIGHTNESS` value (keyed by
+  the percent it reports as) and the user's original `SCREEN_BRIGHTNESS_MODE` to
+  SharedPreferences, written with `commit()` rather than `apply()`. `restore(percent)` reads the
+  stored raw value and writes it back verbatim; converting the percent is a fallback only, and the
+  result reports `exact: false` when that fallback was used. `CapabilityValue` stays a plain
+  percent — no frozen-contract change.
+- **Reason:** ADR-110 established that restoring the percent loses up to one raw unit: 187 reports
+  as 73%, and 73% converts back to 186. The fix at the time was an in-memory `HashMap`, which is
+  correct exactly as long as the process lives. It does not. A context routinely outlives its
+  process — the user starts Study, Android kills the app under memory pressure, they reopen it and
+  end the context an hour later — and by then the map is empty and restore silently returns 186.
+  That is the quiet lie this codebase exists to prevent, and it is worse than a loud failure
+  because nothing reports it: the write succeeds, the read-back confirms 186, and every status is
+  green while the user's setting is gone. `commit()` over `apply()` because the very scenario being
+  defended against is the process dying before an async flush completes.
+- **Alternatives considered:** Widen `CapabilityValue` or `DeviceSnapshot` to carry the raw value —
+  a frozen-contract change (ADR-006) that would leak an Android storage detail into a type Shlok
+  and Dhrey both consume, and would put a number the Memory screen cannot render into user-facing
+  provenance. Encode `"73:187"` into the percent string — same leak, plus every consumer now has to
+  parse it. Store the raw value in `device_snapshot` — that is Dhrey's table and the action engine
+  does not write SQL. SharedPreferences is inside the Aayush module, invisible above the capability
+  boundary, and costs one file.
+- **Impact:** The mode is cleared after a successful exact restore, so the next context captures
+  the user's mode fresh rather than pinning them to a stale one. `MockDevice` models the raw/percent
+  split for the same reason (ADR-007 parity), which is what lets the 187 → 40% → process death →
+  187 case be tested with no phone attached.
+
+### ADR-117 — Restore is snapshot-driven, LIFO with deterministic ties, and never self-clearing
+- **Date:** 2026-08-31 · **Author:** Aayush · **Phase:** 2 · **Status:** Accepted
+- **Decision:** `restoreSession(sessionId, deps)` walks only persisted snapshots, in LIFO order,
+  and returns one `ActionResult` per row using the existing vocabulary. `lifoOrder()` reverses the
+  stored array and then applies a *stable* sort by `capturedAt` descending, so equal timestamps
+  fall back to reverse-storage order. `summariseRestore()` reports `IDLE` when every row came back
+  (counting `skipped` as clean) and `PARTIAL` otherwise, plus `safeToClear`. The function never
+  deletes a snapshot and never writes the session row.
+- **Reason:** Driving restore from stored rows rather than from the plan is what makes it work
+  after a process death — there is no plan in memory to consult — and it means an action that
+  never executed is never restored, with no special case, because nothing was ever written for it.
+  On ties: `capturedAt` is a millisecond clock and SQL leaves equal keys unordered, so a frozen
+  test clock, or simply a fast device, would make restore order depend on the database's whim;
+  reversing before a stable sort removes that. On retention: the rows ARE the retry. Deleting them
+  after a partial restore would strand the user with a half-changed phone and no way back, so
+  clearing is offered to the caller and gated on a clean sweep. `IDLE`/`PARTIAL` are not new
+  states — `endSession()` already takes exactly those, and already documents "Pass PARTIAL when a
+  restore did not fully succeed, so the snapshots stay meaningful for a retry".
+- **Alternatives considered:** Restore from the `ActionPlan` — unavailable after a restart, which
+  is the case that matters most. Clear rows automatically on success — convenient until "success"
+  is partial, and the executor deleting rows is a database write this layer must not perform. Add
+  an `ERROR` restore state — a restore that half-worked is unfinished business with rows still on
+  disk, not something to discard, and `PARTIAL` says exactly that. Sort ties by capability name —
+  deterministic but arbitrary, and unrelated to the order things were actually applied.
+- **Impact:** An empty session restores nothing and reports `IDLE`; there was nothing to put back.
+  A permission revoked mid-context yields `PARTIAL` with every row retained, and re-granting it and
+  running restore again finishes the job exactly. The caller remains responsible for
+  `markSessionActive()` and `endSession()`, unchanged from ADR-115.
+
+### ADR-118 — Context lifecycle is a coordinator over the executor, and the session boundary is a hook
+- **Date:** 2026-08-31 · **Author:** Aayush · **Phase:** 2 · **Status:** Accepted
+- **Decision:** `ContextCoordinator.ts` exposes `startContext(plan, deps)`,
+  `endContext(sessionId, deps)` and `restoreContext(sessionId, deps)`, composing the existing
+  `executePlan()` and `restoreSession()` without re-implementing either. It reports progress
+  through optional `LifecycleHooks` — `onStarted`, `onActivated`, `onFailed`, `onPartial`,
+  `onEnded` — rather than calling Dhrey's session functions itself, so `app/src/actions/` still
+  never imports `src/memory`. Its states are the existing `SessionState` values
+  (`READY`/`ACTIVE`/`PARTIAL`/`ERROR`/`IDLE`); no new enum. `endContext()` clears snapshots only
+  when `summariseRestore().safeToClear`, through the `SnapshotStore` port.
+- **Reason:** The execute → summarise → mark-active and restore → summarise → decide-about-rows
+  sequences were written by hand in the harness and would have been written again by every caller.
+  Each has a rule that is easy to get quietly wrong — never claim ACTIVE when nothing applied,
+  never drop snapshots after a half-restore — and those rules belong in one tested place rather
+  than in each caller's head. Hooks rather than calls because moving a session row is a database
+  write this layer must not make (ADR-114/115), and because a bookkeeping failure upstream must
+  not be able to make a device change that already happened look like it did not: a throwing hook
+  is caught and the device result stands.
+- **Alternatives considered:** Have the coordinator call `markSessionActive()` / `endSession()`
+  directly — crosses the ownership boundary and drags SQLite into every coordinator test. Add a
+  `FAILED` or `RESTORED` session state — `ERROR` and `IDLE` already mean exactly those, and
+  `endSession()` already takes them. Let the caller keep orchestrating — that is what produced the
+  bug below.
+- **Impact:** `onPartial` is scoped to the RESTORE path only. It originally fired for a partly
+  applied plan as well, and the device smoke test caught what that costs: the harness wires
+  `onPartial` to `endSession()`, so a PARTIAL apply ended the session it had just started, and the
+  next `endContext()` found nothing to end. A hook whose meaning depends on which call fired it
+  will be miswired — mine was, within an hour. A partial apply is already fully described by
+  `onActivated(sessionId, 'PARTIAL')`, and a regression test now holds that line. Separately, the
+  summarisers moved from `index.ts` into `summaries.ts` so the coordinator can use them without
+  importing the barrel that exports it — a cycle that worked today and would have broken the first
+  time someone moved a call to module-initialisation time.

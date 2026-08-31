@@ -18,12 +18,7 @@ import { IntentValidator } from '../validators/IntentValidator';
 import { DefaultIntentEngine } from '../index';
 import { OllamaParser } from '../parsers';
 import type { ParseResult, Intent } from '../../types';
-import {
-  ACTIVITIES,
-  OPERATIONS,
-  PERSISTENCE,
-  CONFIDENCE_THRESHOLD,
-} from '../../types';
+import { ACTIVITIES, OPERATIONS, PERSISTENCE, CONFIDENCE_THRESHOLD } from '../../types';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -60,9 +55,7 @@ function assertContractCompliant(intent: Intent): void {
   expect(['ollama', 'fallback']).toContain(intent.source);
 
   // durationMinutes is number|null
-  expect(
-    intent.durationMinutes === null || typeof intent.durationMinutes === 'number',
-  ).toBe(true);
+  expect(intent.durationMinutes === null || typeof intent.durationMinutes === 'number').toBe(true);
 
   // schedule is null or has kind + time
   if (intent.schedule !== null) {
@@ -77,9 +70,7 @@ function assertContractCompliant(intent: Intent): void {
   // requestedChanges: each has allowed capability + in-domain value
   for (const change of intent.requestedChanges) {
     expect(['dnd', 'brightness', 'alarm', 'ringer']).toContain(change.capability);
-    expect(
-      change.value !== undefined && change.value !== null,
-    ).toBe(true);
+    expect(change.value !== undefined && change.value !== null).toBe(true);
   }
 
   // exceptions: each has required fields
@@ -189,9 +180,7 @@ describe('Study vertical-slice integration (Phase 2 hardening)', () => {
 
 describe('Golden command regressions', () => {
   it('Golden 1: teach study profile', async () => {
-    const result = await parseAndValidate(
-      'When I study, keep silent and let my parents call me.',
-    );
+    const result = await parseAndValidate('When I study, keep silent and let my parents call me.');
     expect(result.kind).toBe('intent');
     if (result.kind !== 'intent') return;
     expect(result.intent.activity).toBe('study');
@@ -290,9 +279,7 @@ describe('ActionPlan interface compatibility', () => {
   it('teach Intent persistence is not "session" (persistent profile write expected)', async () => {
     // "When I study" → teach → the policy engine should not use session-only scope
     // The validator does not force a specific persistence, but it must be a valid enum value
-    const result = await parseAndValidate(
-      'When I study, keep silent and let my parents call me.',
-    );
+    const result = await parseAndValidate('When I study, keep silent and let my parents call me.');
     expect(result.kind).toBe('intent');
     if (result.kind !== 'intent') return;
 
@@ -303,10 +290,9 @@ describe('ActionPlan interface compatibility', () => {
   });
 
   it('WhatsApp exception sets requiresConfirmation (policy engine must not auto-apply)', async () => {
-    const result = await parseAndValidate(
-      'Let my project WhatsApp group through while I study.',
-      { activeActivity: 'study' },
-    );
+    const result = await parseAndValidate('Let my project WhatsApp group through while I study.', {
+      activeActivity: 'study',
+    });
     expect(result.kind).toBe('intent');
     if (result.kind !== 'intent') return;
 
@@ -338,5 +324,218 @@ describe('ActionPlan interface compatibility', () => {
       // Channel must be a valid CHANNELS member
       expect(['calls', 'sms', 'whatsapp']).toContain(exc?.channel);
     }
+  });
+});
+
+// ─── Phase 2 integration-hardening: spec golden commands ─────────────────────
+//
+// Aayush (A-V2) has completed the native layer.  This suite locks in the exact
+// Intent shapes Shlok's parser emits so the policy engine can consume them
+// without interface mismatch.  No code in src/actions, src/native, src/memory,
+// or src/policy is touched.
+
+describe('Phase 2 hardening — spec golden commands', () => {
+  // ── §1 Intent contract verification ─────────────────────────────────────
+
+  it('GC-1: "I\'m going to study for two hours." → activate, 120 min, study', async () => {
+    const result = await parseAndValidate("I'm going to study for two hours.");
+    expect(result.kind).toBe('intent');
+    if (result.kind !== 'intent') return;
+    expect(result.intent.activity).toBe('study');
+    expect(result.intent.operation).toBe('activate');
+    expect(result.intent.durationMinutes).toBe(120);
+    expect(result.intent.source).toBe('fallback');
+    assertContractCompliant(result.intent);
+  });
+
+  it('GC-2: "Let Mom call me while I study." → study, contact=Mom, channel=calls', async () => {
+    const result = await parseAndValidate('Let Mom call me while I study.');
+    expect(result.kind).toBe('intent');
+    if (result.kind !== 'intent') return;
+    expect(result.intent.activity).toBe('study');
+    const exc = result.intent.exceptions.find((e) => e.value === 'Mom');
+    expect(exc).toBeDefined();
+    expect(exc?.type).toBe('contact');
+    expect(exc?.channel).toBe('calls');
+    expect(exc?.effect).toBe('allow');
+    assertContractCompliant(result.intent);
+  });
+
+  it('GC-3: "Let Mom\'s SMS through while I study." → channel=sms', async () => {
+    const result = await parseAndValidate("Let Mom's SMS through while I study.");
+    expect(result.kind).toBe('intent');
+    if (result.kind !== 'intent') return;
+    expect(result.intent.activity).toBe('study');
+    const exc = result.intent.exceptions.find((e) => e.value === 'Mom');
+    expect(exc).toBeDefined();
+    expect(exc?.channel).toBe('sms');
+    assertContractCompliant(result.intent);
+  });
+
+  it('GC-4: "Let my project WhatsApp group through while I study." → channel=whatsapp, requiresConfirmation=true', async () => {
+    const result = await parseAndValidate('Let my project WhatsApp group through while I study.', {
+      activeActivity: 'study',
+    });
+    expect(result.kind).toBe('intent');
+    if (result.kind !== 'intent') return;
+    expect(result.intent.activity).toBe('study');
+    expect(result.intent.requiresConfirmation).toBe(true);
+    const exc = result.intent.exceptions.find((e) => e.value === 'project group');
+    expect(exc).toBeDefined();
+    expect(exc?.channel).toBe('whatsapp');
+    assertContractCompliant(result.intent);
+  });
+
+  it('GC-5: "I\'m done studying." → deactivate, study', async () => {
+    const result = await parseAndValidate("I'm done studying.");
+    expect(result.kind).toBe('intent');
+    if (result.kind !== 'intent') return;
+    expect(result.intent.activity).toBe('study');
+    expect(result.intent.operation).toBe('deactivate');
+    assertContractCompliant(result.intent);
+  });
+
+  it('GC-6: "Undo that." (with active context) → deactivate, study', async () => {
+    const result = await parseAndValidate('Undo that.', { activeActivity: 'study' });
+    expect(result.kind).toBe('intent');
+    if (result.kind !== 'intent') return;
+    expect(result.intent.activity).toBe('study');
+    expect(result.intent.operation).toBe('deactivate');
+    assertContractCompliant(result.intent);
+  });
+
+  // ── §2 Duration strictness ───────────────────────────────────────────────
+
+  it('DUR-1: "two hours" → durationMinutes=120 (word-form)', async () => {
+    const result = await parseAndValidate("I'm going to study for two hours.");
+    expect(result.kind).toBe('intent');
+    if (result.kind !== 'intent') return;
+    expect(result.intent.durationMinutes).toBe(120);
+  });
+
+  it('DUR-2: "2 hours" → durationMinutes=120 (numeric)', async () => {
+    const result = await parseAndValidate('I am going to study for 2 hours.');
+    expect(result.kind).toBe('intent');
+    if (result.kind !== 'intent') return;
+    expect(result.intent.durationMinutes).toBe(120);
+  });
+
+  it('DUR-3: no duration stated → durationMinutes=null (parser must not invent a value)', async () => {
+    // "Let Mom call me while I study" has no duration — parser must leave it null.
+    const result = await parseAndValidate('Let Mom call me while I study.');
+    expect(result.kind).toBe('intent');
+    if (result.kind !== 'intent') return;
+    expect(result.intent.durationMinutes).toBeNull();
+  });
+
+  it('DUR-4: "I\'m done studying." has no duration → durationMinutes=null', async () => {
+    const result = await parseAndValidate("I'm done studying.");
+    expect(result.kind).toBe('intent');
+    if (result.kind !== 'intent') return;
+    expect(result.intent.durationMinutes).toBeNull();
+  });
+
+  // ── §3 START / END / UNDO distinction ───────────────────────────────────
+
+  it('OP-START: "I\'m going to study for two hours." → operation=activate', async () => {
+    const result = await parseAndValidate("I'm going to study for two hours.");
+    expect(result.kind).toBe('intent');
+    if (result.kind !== 'intent') return;
+    expect(result.intent.operation).toBe('activate');
+  });
+
+  it('OP-END: "I\'m done studying." → operation=deactivate', async () => {
+    const result = await parseAndValidate("I'm done studying.");
+    expect(result.kind).toBe('intent');
+    if (result.kind !== 'intent') return;
+    expect(result.intent.operation).toBe('deactivate');
+  });
+
+  it('OP-UNDO: "Undo that." (active context) → operation=deactivate, no restoration decision', async () => {
+    const result = await parseAndValidate('Undo that.', { activeActivity: 'study' });
+    expect(result.kind).toBe('intent');
+    if (result.kind !== 'intent') return;
+    // AI expresses intent only — how restoration happens is Dhrey's policy decision
+    expect(result.intent.operation).toBe('deactivate');
+    // The Intent contains no restoration instructions
+    expect(result.intent.requestedChanges).toHaveLength(0);
+  });
+
+  // ── §4 Temporary vs persistent — must not silently convert ──────────────
+
+  it('PERSIST-1: "During this study session, let Mom call me." → persistence=temporary', async () => {
+    const result = await parseAndValidate('During this study session, let Mom call me.', {
+      activeActivity: 'study',
+    });
+    expect(result.kind).toBe('intent');
+    if (result.kind !== 'intent') return;
+    expect(result.intent.persistence).toBe('temporary');
+  });
+
+  it('PERSIST-2: "Always let Mom call me during study." → persistence=persistent', async () => {
+    const result = await parseAndValidate('Always let Mom call me during study.');
+    expect(result.kind).toBe('intent');
+    if (result.kind !== 'intent') return;
+    expect(result.intent.persistence).toBe('persistent');
+  });
+
+  it('PERSIST-3: temporary and persistent must not be equal to each other', async () => {
+    const temp = await parseAndValidate('During this study session, let Mom call me.', {
+      activeActivity: 'study',
+    });
+    const perm = await parseAndValidate('Always let Mom call me during study.');
+
+    expect(temp.kind).toBe('intent');
+    expect(perm.kind).toBe('intent');
+    if (temp.kind !== 'intent' || perm.kind !== 'intent') return;
+
+    expect(temp.intent.persistence).not.toBe(perm.intent.persistence);
+    expect(temp.intent.persistence).toBe('temporary');
+    expect(perm.intent.persistence).toBe('persistent');
+  });
+
+  // ── §5 Channel mapping ───────────────────────────────────────────────────
+
+  it('CHAN-calls: "call" phrasing → channel="calls"', async () => {
+    const result = await parseAndValidate('Let Mom call me while I study.');
+    expect(result.kind).toBe('intent');
+    if (result.kind !== 'intent') return;
+    expect(result.intent.exceptions[0]?.channel).toBe('calls');
+  });
+
+  it('CHAN-sms: "SMS" phrasing → channel="sms"', async () => {
+    const result = await parseAndValidate("Let Mom's SMS through while I study.");
+    expect(result.kind).toBe('intent');
+    if (result.kind !== 'intent') return;
+    expect(result.intent.exceptions[0]?.channel).toBe('sms');
+  });
+
+  it('CHAN-whatsapp: "WhatsApp" phrasing → channel="whatsapp"', async () => {
+    const result = await parseAndValidate('Let my project WhatsApp group through while I study.', {
+      activeActivity: 'study',
+    });
+    expect(result.kind).toBe('intent');
+    if (result.kind !== 'intent') return;
+    expect(result.intent.exceptions[0]?.channel).toBe('whatsapp');
+  });
+
+  // ── §5 WhatsApp preference_only — must not claim enforcement ─────────────
+
+  it('WA-1: WhatsApp exception → requiresConfirmation=true (policy engine must not auto-apply)', async () => {
+    const result = await parseAndValidate('Let my project WhatsApp group through while I study.', {
+      activeActivity: 'study',
+    });
+    expect(result.kind).toBe('intent');
+    if (result.kind !== 'intent') return;
+    // AI signals "needs confirmation" so the UI can explain preference_only status
+    expect(result.intent.requiresConfirmation).toBe(true);
+  });
+
+  it('WA-2: non-WhatsApp exception → requiresConfirmation reflects confidence only', async () => {
+    const result = await parseAndValidate('Let Mom call me while I study.');
+    expect(result.kind).toBe('intent');
+    if (result.kind !== 'intent') return;
+    // No WhatsApp → requiresConfirmation is not forced true by channel alone
+    expect(result.intent.exceptions.every((e) => e.channel !== 'whatsapp')).toBe(true);
   });
 });

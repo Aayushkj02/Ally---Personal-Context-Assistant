@@ -12,7 +12,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
-import type { ActionResult, CapabilityValue, DndMode } from './src/types';
+import type { ActionResult, CapabilityValue, Channel, DndMode } from './src/types';
 import { STATUS_PRESENTATION } from './src/types';
 import {
   device,
@@ -21,6 +21,36 @@ import {
   applyPriorityPreferences,
   analyseCallLog,
 } from './src/native';
+import { PriorityScreen } from './src/screens';
+import {
+  startContext,
+  endContext as endContextLifecycle,
+  createRepositorySnapshotStore,
+  type LifecycleHooks,
+} from './src/actions';
+import { activateFromText } from './src/services/contextOrchestrator';
+import { ensureSeeded, getActiveContext, markSessionActive, endSession } from './src/memory';
+
+/**
+ * A-V3: the coordinator's session hooks, wired to Dhrey's PUBLIC session API.
+ *
+ * This is the whole integration seam. `app/src/actions/` never imports `src/memory` — it reports
+ * what happened to the phone and fires these, and the wiring lives here in the caller. When
+ * Dhrey's orchestrator takes over from this harness it connects the same three callbacks and
+ * nothing in the action engine changes.
+ */
+const sessionHooks: LifecycleHooks = {
+  onActivated: (sessionId) => markSessionActive(sessionId).then(() => undefined),
+  onEnded: (sessionId, state) => endSession(sessionId, { status: state }).then(() => undefined),
+  onPartial: (sessionId) => endSession(sessionId, { status: 'PARTIAL' }).then(() => undefined),
+};
+
+/**
+ * A-V1: the real Phase 2 sentence. Not a fixture — this string goes through Shlok's parser,
+ * Dhrey's policy engine and buildActionPlan(), and whatever ActionPlan comes out is what the
+ * executor receives. Nothing here constructs a plan by hand.
+ */
+const STUDY_COMMAND = "I'm going to study for two hours.";
 
 const DND_TESTS: { label: string; value: DndMode }[] = [
   { label: 'Priority', value: 'priority' },
@@ -49,6 +79,32 @@ function channelRows(r: {
 }
 
 export default function App() {
+  const [showPriority, setShowPriority] = useState(false);
+
+  if (showPriority) {
+    return (
+      <View style={{ flex: 1 }}>
+        <PriorityScreen
+          onApply={(channels: Record<Channel, boolean>) => {
+            const r = applyPriorityPreferences({
+              calls: channels.calls,
+              sms: channels.sms,
+              whatsapp: channels.whatsapp,
+            });
+            return r?.channels ?? null;
+          }}
+        />
+        <Pressable style={styles.backBtn} onPress={() => setShowPriority(false)}>
+          <Text style={styles.btnText}>Back to device harness</Text>
+        </Pressable>
+      </View>
+    );
+  }
+
+  return <DeviceHarness onOpenPriority={() => setShowPriority(true)} />;
+}
+
+function DeviceHarness({ onOpenPriority }: { onOpenPriority: () => void }) {
   const info = getNativeDeviceInfo();
   const dnd = device.get('dnd');
 
@@ -85,6 +141,107 @@ export default function App() {
     },
     [dnd, refresh],
   );
+
+  /**
+   * A-V1: sentence -> Intent -> Policy -> ActionPlan -> ActionExecutor -> capability -> phone.
+   *
+   * The harness does exactly two things: ask Dhrey's orchestrator for a plan, and hand that
+   * plan to the executor along with a device registry and a snapshot store. It never touches
+   * an Android API itself and never builds a PlannedAction — that is the whole boundary
+   * being proven here.
+   */
+  const runStudyPlan = useCallback(async () => {
+    setProbe({ verdict: `parsing "${STUDY_COMMAND}" …` });
+
+    try {
+      await ensureSeeded();
+      const outcome = await activateFromText(STUDY_COMMAND);
+
+      if (outcome.kind !== 'activated') {
+        setProbe({
+          verdict: 'parser asked for clarification — nothing was applied',
+          question: outcome.clarification.question,
+        });
+        return;
+      }
+
+      const phases: string[] = [];
+
+      // One call. The execute -> summarise -> mark-active sequence lives in the coordinator now,
+      // not here; the harness supplies a device, a store and the hooks (ADR-118).
+      const { state, results, summary } = await startContext(outcome.plan, {
+        registry: device,
+        // Durable: Dhrey's device_snapshot table, reached through the SnapshotStore port.
+        snapshots: createRepositorySnapshotStore(),
+        hooks: sessionHooks,
+        onProgress: (e) => {
+          if (e.phase !== 'pending') phases.push(`${e.capability}:${e.phase}`);
+        },
+      });
+
+      setLog(results.slice().reverse());
+      setProbe({
+        verdict: `${state} — ${summary.byStatus.applied}/${summary.total} applied`,
+        sentence: STUDY_COMMAND,
+        session: outcome.plan.sessionId,
+        ...Object.fromEntries(
+          results.map((r, i) => [`${i + 1}. ${r.capability}`, `${r.status} — ${r.message}`]),
+        ),
+        order: phases.join('  '),
+      });
+      await refresh();
+    } catch (e) {
+      setProbe({ verdict: 'run failed', error: e instanceof Error ? e.message : String(e) });
+    }
+  }, [refresh]);
+
+  /**
+   * A-V2: end the context and put the phone back.
+   *
+   * The session id is read from the DATABASE, not from React state, which is the whole point:
+   * after the app has been force-stopped and reopened there is no React state left, and the
+   * restore still has to work.
+   */
+  const onEndContext = useCallback(async () => {
+    setProbe({ verdict: 'ending context…' });
+
+    try {
+      await ensureSeeded();
+      const active = await getActiveContext();
+      if (!active) {
+        setProbe({ verdict: 'no active context to end' });
+        return;
+      }
+
+      const snapshots = createRepositorySnapshotStore();
+      const before = await snapshots.forSession(active.session.id);
+
+      // One call. Restore, summarise, clear-only-if-clean and the session hook are all the
+      // coordinator's job — the harness no longer decides when it is safe to drop rows.
+      const { state, results, summary, cleared, retryable } = await endContextLifecycle(
+        active.session.id,
+        { registry: device, snapshots, hooks: sessionHooks },
+      );
+
+      setLog(results.slice().reverse());
+      setProbe({
+        verdict: `restore ${state} — ${summary.byStatus.restored}/${summary.total} restored`,
+        session: active.session.id,
+        snapshots: before.map((r) => `${r.capability}=${String(r.previousValue)}`).join('  '),
+        retryable: String(retryable),
+        ...Object.fromEntries(
+          results.map((r, i) => [
+            `${i + 1}. ${r.capability}`,
+            `${r.status} — ${String(r.beforeValue)} → ${String(r.afterValue)}`,
+          ]),
+        ),
+        cleared: String(cleared),
+      });
+      await refresh();
+    } catch (e) {
+      setProbe({ verdict: 'restore failed', error: e instanceof Error ? e.message : String(e) });
+    }
+  }, [refresh]);
 
   return (
     <ScrollView contentContainerStyle={styles.root}>
@@ -128,6 +285,27 @@ export default function App() {
       <Pressable style={[styles.btn, styles.btnProbe]} onPress={() => setProbe(runDndProbe())}>
         <Text style={styles.btnText}>Run device probe</Text>
       </Pressable>
+
+      <Pressable style={[styles.btn, styles.btnProbe]} onPress={onOpenPriority}>
+        <Text style={styles.btnText}>Open Priority screen</Text>
+      </Pressable>
+
+      <View style={styles.divider} />
+      <Text style={styles.section}>Study vertical slice (A-V1)</Text>
+      <Text style={styles.info}>
+        &quot;{STUDY_COMMAND}&quot; → Intent → Policy → ActionPlan → startContext() → capability →
+        phone. Expect ringer to come back not_supported until T5, so the plan is PARTIAL.
+      </Text>
+      <Pressable style={[styles.btn, styles.btnProbe]} onPress={() => void runStudyPlan()}>
+        <Text style={styles.btnText}>Run the Study sentence</Text>
+      </Pressable>
+      <Pressable style={[styles.btn, styles.btnProbe]} onPress={() => void onEndContext()}>
+        <Text style={styles.btnText}>End context (restore)</Text>
+      </Pressable>
+      <Text style={styles.info}>
+        End context reads the session from the database, so it still works after the app has been
+        force-stopped and reopened. That is the A-V2 proof.
+      </Text>
 
       <View style={styles.divider} />
       <Text style={styles.section}>Brightness (T4)</Text>
@@ -235,6 +413,7 @@ const styles = StyleSheet.create({
   probeBox: { marginTop: 12, padding: 12, borderRadius: 8, backgroundColor: '#161C26', gap: 3 },
   probeVerdict: { color: '#F5F7FA', fontSize: 14, fontWeight: '700', marginBottom: 6 },
   probeRow: { color: '#9AA4B2', fontSize: 12 },
+  backBtn: { backgroundColor: '#232A35', padding: 14, alignItems: 'center' },
   btnText: { color: '#F5F7FA', fontSize: 13, fontWeight: '600' },
   result: { marginTop: 10, gap: 3 },
   pill: { alignSelf: 'flex-start', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 999 },

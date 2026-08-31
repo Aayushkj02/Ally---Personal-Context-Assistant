@@ -14,11 +14,11 @@ export async function getDatabase(): Promise<SQLite.SQLiteDatabase> {
   if (dbInstance) {
     return dbInstance;
   }
-  
+
   dbInstance = await SQLite.openDatabaseAsync('ally.db');
   await dbInstance.execAsync('PRAGMA foreign_keys = ON;');
-  
+
   await runMigrations(dbInstance);
-  
+
   return dbInstance;
 }

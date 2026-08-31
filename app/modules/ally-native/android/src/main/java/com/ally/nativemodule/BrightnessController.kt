@@ -1,6 +1,7 @@
 package com.ally.nativemodule
 
 import android.content.Context
+import android.content.SharedPreferences
 import android.provider.Settings
 
 /**
@@ -15,6 +16,14 @@ import android.provider.Settings
  * when the restore target matches the snapshotted percent. The percent stays the contract
  * currency; the raw value is how we keep the promise.
  *
+ * THAT MEMORY IS ON DISK, NOT IN THE HEAP (ADR-116). A context can outlive the process — the
+ * user starts Study, Android kills the app, they reopen it and end the context an hour later.
+ * An in-heap cache is empty by then and restore silently falls back to toRaw(73) = 186, one
+ * unit off the 187 they started from. That is a quiet lie of exactly the kind this codebase
+ * exists to prevent, so the raw value and the original brightness mode live in
+ * SharedPreferences and are written with commit(), not apply(), because the very scenario
+ * being defended against is the process dying before an async flush completes.
+ *
  * ADAPTIVE BRIGHTNESS: if the device is in automatic mode, the light sensor overwrites any
  * manual value within moments — a write that "succeeds" and then silently reverts, which is
  * exactly the false success the architecture exists to prevent. We snapshot the mode, switch
@@ -25,15 +34,50 @@ object BrightnessController {
   /** Settings.System.SCREEN_BRIGHTNESS range on this device. Verified on SM-S928B. */
   private const val RAW_MAX = 255
 
+  private const val PREFS = "ally_brightness"
+  /** Exact raw value, keyed by the percent it reports as: "raw_73" -> 187. */
+  private const val KEY_RAW_PREFIX = "raw_"
+  /** The user's SCREEN_BRIGHTNESS_MODE from before Ally touched anything. */
+  private const val KEY_MODE = "snap_mode"
+
+  private fun prefs(context: Context): SharedPreferences =
+    context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+
   /**
-   * Every raw value we have observed, keyed by the percent it reports as.
+   * Remembers the exact raw value for a percent.
    *
-   * A single slot is not enough: the UI re-snapshots after each change to refresh its display,
-   * which would clobber the original. Caught on device — restoring 73% returned raw 186 instead
-   * of the 187 we started from, because by then the slot held 30%/77.
+   * Keyed BY PERCENT, not a single slot: the UI re-snapshots after each change to refresh its
+   * display, and one slot would clobber the original. Caught on device — restoring 73% returned
+   * raw 186 instead of the 187 we started from, because by then the slot held 30%/77.
+   *
+   * Last write wins for a given percent, deliberately. snapshot() runs immediately before each
+   * apply and reports what is true right then, so the newest reading for a percent IS the
+   * correct one. Session-scoped first-write-wins is enforced a layer up, in SnapshotStore.
    */
-  private val rawByPercent = HashMap<Int, Int>()
-  private var snapMode: Int? = null
+  private fun rememberRaw(context: Context, percent: Int, raw: Int) {
+    prefs(context).edit().putInt(KEY_RAW_PREFIX + percent, raw).commit()
+  }
+
+  private fun recallRaw(context: Context, percent: Int): Int? {
+    val p = prefs(context)
+    val key = KEY_RAW_PREFIX + percent
+    return if (p.contains(key)) p.getInt(key, -1).takeIf { it >= 0 } else null
+  }
+
+  /** First write wins, and a successful restore clears it so the next context captures fresh. */
+  private fun rememberMode(context: Context, mode: Int) {
+    val p = prefs(context)
+    if (!p.contains(KEY_MODE)) p.edit().putInt(KEY_MODE, mode).commit()
+  }
+
+  private fun recallMode(context: Context): Int? {
+    val p = prefs(context)
+    return if (p.contains(KEY_MODE)) p.getInt(KEY_MODE, -1).takeIf { it >= 0 } else null
+  }
+
+  private fun forgetMode(context: Context) {
+    prefs(context).edit().remove(KEY_MODE).commit()
+  }
 
   private fun toPercent(raw: Int): Int = Math.round(raw * 100f / RAW_MAX).coerceIn(0, 100)
   private fun toRaw(percent: Int): Int = Math.round(percent.coerceIn(0, 100) * RAW_MAX / 100f)
@@ -60,8 +104,8 @@ object BrightnessController {
     val raw = readRaw(context)
       ?: return mapOf("ok" to false, "reason" to "unsupported", "percent" to null, "raw" to null)
     val percent = toPercent(raw)
-    rawByPercent[percent] = raw
-    if (snapMode == null) snapMode = readMode(context)
+    rememberRaw(context, percent, raw)
+    readMode(context)?.let { rememberMode(context, it) }
     return mapOf(
       "ok" to true,
       "reason" to null,
@@ -80,8 +124,16 @@ object BrightnessController {
    * original brightness mode back too.
    */
   fun restore(context: Context, percent: Int): Map<String, Any?> {
-    val exactRaw = rawByPercent[percent]
-    return write(context, percent, exactRaw ?: toRaw(percent), restoreMode = true)
+    val exactRaw = recallRaw(context, percent)
+    val out = write(context, percent, exactRaw ?: toRaw(percent), restoreMode = true)
+
+    // `exact` is the A-V2 proof: true means we wrote the raw value we actually captured, false
+    // means we had to reconstruct it from the percent and may be a unit off. Never inferred
+    // from the result — reported from whether the stored value was there.
+    val exact = exactRaw != null
+    if (out["ok"] == true && exact) forgetMode(context)
+
+    return out + mapOf("exact" to exact, "restoredRaw" to (exactRaw ?: toRaw(percent)))
   }
 
   private fun write(context: Context, percent: Int, raw: Int, restoreMode: Boolean): Map<String, Any?> {
@@ -104,7 +156,7 @@ object BrightnessController {
       Settings.System.putInt(context.contentResolver, Settings.System.SCREEN_BRIGHTNESS, raw)
 
       if (restoreMode) {
-        snapMode?.let {
+        recallMode(context)?.let {
           Settings.System.putInt(context.contentResolver, Settings.System.SCREEN_BRIGHTNESS_MODE, it)
         }
       }

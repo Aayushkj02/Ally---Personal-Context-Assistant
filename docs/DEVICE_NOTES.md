@@ -361,6 +361,26 @@ Test 4 is the one that fails if anyone ever swaps the rolling window for "calls 
 for persistent callers is Android's own `PRIORITY_CATEGORY_REPEAT_CALLERS` on its 15-minute
 rule. Emergency classification is contextual and never writes to the user's priority list.
 
+
+## Priority screen — data and policy layer (Dhrey)
+
+`priority_preference` table, migration-managed via `PRAGMA user_version`. One row per
+(mode, channel, subject) with `UNIQUE(profile_id, channel, subject)`, so re-adding someone
+updates rather than duplicates.
+
+**Stored per contact, applied per scope (ADR-301).** The user names people; Android only
+understands starred / all contacts / anyone. `resolvePriority()` reduces the rows to a
+per-channel boolean for the device layer and returns `requiresStarring` so the screen can
+tell the user exactly who to star. Without that, "why didn't Mom ring?" has no answer.
+
+**WhatsApp shows its real state.** The screen renders `preference_only` from
+`ENFORCEMENT_PRESENTATION` — "Remembered, not enforced" — never a tick.
+
+### Demo prerequisite, worth repeating
+
+Priority contacts on **calls** and **SMS** must be **starred in the phone's Contacts app**.
+Adding them in Ally records the intent; Android will not act on it otherwise.
+
 ### Still to check before the demo
 
 - [ ] Run `DndProbe` on the actual iQOO and fill in the column above
@@ -426,3 +446,67 @@ Run this before the rehearsal and again before going on stage.
 - [ ] `adb reverse tcp:11434 tcp:11434` connected over USB
 - [ ] Ollama running, model warm (send one throwaway request)
 - [ ] Airplane-mode run rehearsed at least once
+
+---
+
+## A-V2 — exact restore across process death (2026-08-31, SM-S928B, Android 16 / API 36)
+
+The A-V2 acceptance test. Every value below was read with `adb shell settings` / `dumpsys`,
+independently of anything the app reported. The app was **force-stopped between apply and
+restore**, which is the entire point: a context routinely outlives its process.
+
+| Stage | `screen_brightness` | `screen_brightness_mode` | `zen_mode` |
+|---|---|---|---|
+| Before context | **187** | 0 (manual) | 0 (off) |
+| Context active | 102 (40%) | 0 | 1 (priority) |
+| After `am force-stop` | 102 | 0 | 1 |
+| **After restore** | **187** | 0 | **0** |
+
+**187 → 102 → process death → restore → 187.** Not 186. That single unit is the whole of
+ADR-116: the contract carries brightness as a percent, 187 reports as 73%, and 73% converts
+back to 186, so a percent-only restore silently loses the user's setting while every status
+reads green.
+
+Evidence the exactness is on disk and not in the heap — `shared_prefs/ally_brightness.xml`,
+read from the device while the context was active:
+
+```xml
+<int name="snap_mode" value="0" />
+<int name="raw_73" value="187" />   <!-- the exact value restore writes back -->
+<int name="raw_40" value="102" />
+```
+
+`snap_mode` reappears after a restore because the harness immediately re-snapshots to refresh
+its display, which is the next context capturing the user's mode fresh. That is intended.
+
+**NotificationManager.Policy was byte-identical before and after:**
+
+```
+priorityCategories=PRIORITY_CATEGORY_ALARMS,PRIORITY_CATEGORY_MEDIA,
+priorityCallSenders=PRIORITY_SENDERS_STARRED,priorityMessageSenders=PRIORITY_SENDERS_STARRED,
+priorityConvSenders=none,mExceptionContacts=[],mAppBypassDndList=[]
+```
+
+Stated precisely: the Study `ActionPlan` changes the **zen mode** and never touches the
+notification policy, so the policy is preserved because nothing modified it — not because
+restore actively put it back. Policy restoration after the priority flow (`dndSetPriority`)
+has a separate process-lifetime problem, recorded below.
+
+**LIFO confirmed on device.** Captured dnd then brightness; restored brightness then dnd —
+the reverse of application:
+
+```
+restore IDLE — 2/2 restored
+1. brightness: restored — 40 → 73
+2. dnd:        restored — priority → off
+cleared: true
+```
+
+Afterwards `device_snapshot` held **0 rows** and the session was `IDLE`.
+
+### Still process-lifetime, NOT fixed by A-V2
+
+`DndController.savedPolicy` (the `NotificationManager.Policy` captured by the priority flow) is
+still a heap field. It is not part of any `ActionPlan`, so no A-V2 path depends on it, but a
+priority context that outlives its process cannot put the user's policy back. Same class of bug
+as ADR-116, different capability. Fix it when priority gets a restore path.

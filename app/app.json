@@ -9,6 +9,11 @@
     "android": {
       "package": "com.ally.assistant"
     },
-    "plugins": ["expo-dev-client", "expo-splash-screen", "./plugins/withZenRuleIntentFilter"]
+    "plugins": [
+      "expo-dev-client",
+      "expo-splash-screen",
+      "./plugins/withZenRuleIntentFilter",
+      "expo-sqlite"
+    ]
   }
 }

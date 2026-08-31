@@ -75,9 +75,7 @@ const RESULTS: ActionResult[] = [
 let fetchMock: jest.SpyInstance;
 let lastFetchBody: SessionSyncMessage | null;
 
-function installFetch(
-  response: { ok: boolean; status: number } = { ok: true, status: 204 },
-): void {
+function installFetch(response: { ok: boolean; status: number } = { ok: true, status: 204 }): void {
   lastFetchBody = null;
   fetchMock = jest.spyOn(globalThis, 'fetch').mockImplementation(async (_url, init) => {
     if (init?.body) {
@@ -243,9 +241,9 @@ describe('D-V10 Session Sync / Bridge', () => {
     expect(isValidSyncMessage({ event: 'session_started' })).toBe(false);
     expect(isValidSyncMessage({ event: 'session_started', sessionId: '' })).toBe(false);
     expect(isValidSyncMessage({ event: 'session_started', sessionId: 'x' })).toBe(false);
-    expect(
-      isValidSyncMessage({ event: 'session_started', sessionId: 'x', payload: null }),
-    ).toBe(false);
+    expect(isValidSyncMessage({ event: 'session_started', sessionId: 'x', payload: null })).toBe(
+      false,
+    );
 
     // Valid message should pass:
     expect(
@@ -286,17 +284,11 @@ describe('D-V10 Session Sync / Bridge', () => {
       client.syncSessionStarted(SESSION_ID, PROFILE_ID, 'READY', 120),
     ).resolves.toBeUndefined();
 
-    await expect(
-      client.syncPlanSubmitted(SESSION_ID, PROFILE_ID, PLAN),
-    ).resolves.toBeUndefined();
+    await expect(client.syncPlanSubmitted(SESSION_ID, PROFILE_ID, PLAN)).resolves.toBeUndefined();
 
-    await expect(
-      client.syncResultsReceived(SESSION_ID, RESULTS),
-    ).resolves.toBeUndefined();
+    await expect(client.syncResultsReceived(SESSION_ID, RESULTS)).resolves.toBeUndefined();
 
-    await expect(
-      client.syncSessionEnded(SESSION_ID, 'IDLE'),
-    ).resolves.toBeUndefined();
+    await expect(client.syncSessionEnded(SESSION_ID, 'IDLE')).resolves.toBeUndefined();
 
     expect(client.connectionState).toBe('disconnected');
   });
@@ -374,7 +366,6 @@ describe('D-V10 Session Sync / Bridge', () => {
     const { FallbackParser } = await import('../../ai/parsers');
     const { IntentValidator } = await import('../../ai/validators');
 
-
     await getDatabase();
     await ensureSeeded();
 
@@ -429,16 +420,14 @@ describe('D-V10 Session Sync / Bridge', () => {
     );
 
     // Extract only actual import lines (not comments/doc blocks).
-    const importLines = source
-      .split('\n')
-      .filter((line) => {
-        const trimmed = line.trim();
-        // Skip comments and blank lines.
-        if (trimmed.startsWith('*') || trimmed.startsWith('//') || trimmed.startsWith('/*')) {
-          return false;
-        }
-        return trimmed.startsWith('import ') || trimmed.startsWith('import{');
-      });
+    const importLines = source.split('\n').filter((line) => {
+      const trimmed = line.trim();
+      // Skip comments and blank lines.
+      if (trimmed.startsWith('*') || trimmed.startsWith('//') || trimmed.startsWith('/*')) {
+        return false;
+      }
+      return trimmed.startsWith('import ') || trimmed.startsWith('import{');
+    });
 
     const importBlock = importLines.join('\n');
 
