@@ -213,7 +213,27 @@ Because entries never move and IDs never collide, a merge conflict here is alway
   `requiresConfirmation: true`. Policy must prompt the user or surface `preference_only` status
   before acting. The intent is recorded in the command log so the Memory screen can show provenance.
 
+### ADR-204 — Teaching, query, and correction intent representation with source sentence preservation
+- **Date:** 2026-08-31 · **Author:** Shlok · **Phase:** 4 · **Status:** Accepted
+- **Decision:** Phase 4 memory, teaching, and query commands are represented within the frozen `Intent`
+  contract without adding new fields. Teaching commands ("Remember that...", "Learn that...", "Always let...")
+  produce `operation: 'teach'` and `persistence: 'persistent'`. Memory query commands ("What do you remember...",
+  "Why do you let...", "When did I teach...") produce `operation: 'query'` with no device changes (`requestedChanges: []`).
+  Preference corrections and removals ("Actually, don't let...", "Remove Mom from...") emit `effect: 'block'` on
+  the targeted exception. `rawText` always retains the exact verbatim user sentence for the Memory screen's provenance.
+- **Reason:** The frozen `Intent` contract (src/types/intent.ts) already contains the complete expressive surface
+  needed (`operation`, `persistence`, `exceptions[].effect`, `rawText`). Adding separate memory types would cross
+  contract boundaries and break parallel workflows. Storing the exact user sentence in `rawText` directly fulfills
+  Phase 4's primary product gate ("a preference Ally learns can be traced back to the sentence that taught it")
+  without lossy LLM summarization.
+- **Alternatives considered:** Synthesize AI summaries for memory storage — rejected; destroys audit provenance
+  and violates the Phase 4 gate. Have AI query the SQLite database directly — rejected; violates module ownership
+  (Dhrey owns database storage/retrieval).
+- **Impact:** Dhrey's memory layer receives unambiguous `teach`, `query`, and `modify` intents with full channel
+  and exception scoping. The provenance chain is 100% faithful to the user's spoken words.
+
 ---
+
 
 ## ADR-1xx — Aayush (device, native, actions)
 
