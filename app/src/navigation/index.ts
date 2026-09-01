@@ -16,7 +16,12 @@
 
 import { useCallback, useState } from 'react';
 
-export const ROUTES = ['home', 'activeContext', 'priority'] as const;
+/**
+ * `devtools` arrived in Phase 6 (A6.6). The Phase 2 harness is no longer the way in — Home is —
+ * but the harness was not deleted, because its probes are still the fastest way to diagnose a
+ * phone that is misbehaving. Demoted, not discarded.
+ */
+export const ROUTES = ['home', 'activeContext', 'priority', 'devtools'] as const;
 export type Route = (typeof ROUTES)[number];
 
 export interface Navigator {

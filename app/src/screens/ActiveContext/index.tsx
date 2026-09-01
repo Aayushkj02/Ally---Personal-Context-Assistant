@@ -18,6 +18,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
+import { StatusChip } from '../../components';
 import type { ActionResult, ChannelEnforcement, ContextSession } from '../../types';
 import { ENFORCEMENT_PRESENTATION, STATUS_PRESENTATION } from '../../types';
 import type { ContextState, EmergencyStatus } from '../../actions';
@@ -142,14 +143,18 @@ export default function ActiveContextScreen({
         <Text style={s.h2}>What Ally changed</Text>
         {results.length === 0 ? <Text style={s.empty}>Nothing yet.</Text> : null}
         {results.map((r, i) => {
-          const p = STATUS_PRESENTATION[r.status];
           return (
             <View key={`${r.capability}-${i}`} style={s.row}>
               <View style={s.rowHead}>
                 <Text style={s.rowTitle}>{r.capability}</Text>
-                <View style={[s.pill, { backgroundColor: TONE_COLOR[p.tone] ?? colors.neutral }]}>
-                  <Text style={s.pillText}>{p.label}</Text>
-                </View>
+                {/*
+                  A6.6: the design system's own chip, which takes `ActionStatus` and renders
+                  through the frozen STATUS_PRESENTATION — so all six statuses survive.
+                  `StatusRow` is deliberately NOT used: its five states cannot express
+                  `permission_needed`, `skipped` or `restored`, and collapsing three of six is
+                  exactly the rounding executionStatus.test.ts exists to prevent.
+                */}
+                <StatusChip status={r.status} />
               </View>
               <Text style={s.rowDetail}>
                 {String(r.beforeValue)} → {String(r.afterValue)}

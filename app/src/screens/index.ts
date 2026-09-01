@@ -14,6 +14,8 @@
  * None of these are Phase 1 work.
  */
 
+export { default as HomeScreen } from './Home';
+export type { HomeScreenProps } from './Home';
 export { default as ActiveContextScreen } from './ActiveContext';
 export type { ActiveContextScreenProps } from './ActiveContext';
 export { default as PriorityScreen } from './Priority';

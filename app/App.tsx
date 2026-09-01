@@ -45,6 +45,7 @@ import { activateFromText } from './src/services/contextOrchestrator';
 import { sessionSync } from './src/services/sessionSync';
 import { useRoute } from './src/navigation';
 import { ActiveContextScreen } from './src/screens';
+import HomeScreen from './src/screens/Home';
 import { applyPriorityForActivity } from './src/services/priorityIntegration';
 import {
   ensureSeeded,
@@ -142,6 +143,7 @@ export default function App() {
   const [emergency, setEmergency] = useState<EmergencyStatus | null>(null);
   const [busy, setBusy] = useState(false);
   const [endError, setEndError] = useState<string | null>(null);
+  const deviceInfo = getNativeDeviceInfo();
 
   /** Re-reads whatever context is genuinely running. The DB is the source of truth. */
   const refreshContext = useCallback(async () => {
@@ -161,6 +163,67 @@ export default function App() {
   useEffect(() => {
     void refreshContext();
   }, [refreshContext]);
+
+  /**
+   * A6.3 — the product path, and the only one Home uses.
+   *
+   * Sentence → Dhrey's orchestrator → ActionPlan → ContextCoordinator → ActionExecutor → device.
+   * There is deliberately no branch here that reaches an Android API directly: Home cannot start
+   * a context except through the executor, which is the whole point of the task.
+   *
+   * `DeviceHarness` keeps its own richer version behind the `devtools` route because it renders
+   * raw probe internals a product screen has no business showing. Both call the same
+   * activateFromText → startContext path, so neither can drift into a second execution route.
+   */
+  const runSentence = useCallback(
+    async (sentence: string) => {
+      setBusy(true);
+      try {
+        await ensureSeeded();
+        const outcome = await activateFromText(sentence);
+        if (outcome.kind !== 'activated') return;
+
+        // A5.3 — the recurrence the user actually said, bound before the device is handed over.
+        const schedule = outcome.intent.schedule;
+        const registry =
+          schedule && schedule.kind !== 'none'
+            ? withAlarmContext(device, {
+                recurrence: schedule.kind === 'weekdays' ? 'weekdays' : 'once',
+                sessionId: outcome.plan.sessionId,
+              })
+            : device;
+
+        const started = await startContext(outcome.plan, {
+          registry,
+          snapshots: createRepositorySnapshotStore(),
+          hooks: sessionHooks,
+          applyPriority: async () => {
+            const o = await applyPriorityForActivity(outcome.intent.activity);
+            return o?.enforcement ?? null;
+          },
+        });
+
+        setState(started.state);
+        setResults(started.results);
+        setReasons(started.explained.map((e) => e.reason));
+        setPriority(started.priority);
+        setEmergency(null);
+        setEndError(null);
+
+        // A6.5 — software/session-sync mirror. Not the physical Office Kit.
+        void mirrorContextStart(outcome.plan, started, sessionSync, {
+          profileId: outcome.profile.id,
+          durationMinutes: outcome.intent.durationMinutes,
+        });
+
+        await refreshContext();
+        navigate('activeContext');
+      } finally {
+        setBusy(false);
+      }
+    },
+    [refreshContext, navigate],
+  );
 
   if (route === 'priority') {
     return (
@@ -237,21 +300,50 @@ export default function App() {
     );
   }
 
+  if (route === 'devtools') {
+    return (
+      <DeviceHarness
+        onOpenPriority={() => navigate('priority')}
+        onOpenActive={() => {
+          void refreshContext();
+          navigate('activeContext');
+        }}
+        onStarted={(next) => {
+          setState(next.state);
+          setResults(next.results);
+          setReasons(next.explained.map((e) => e.reason));
+          setPriority(next.priority);
+          setEmergency(null);
+          void refreshContext();
+        }}
+        onBack={home}
+      />
+    );
+  }
+
+  // A6.6 — Home is the way in. The Phase 2 harness is demoted to `devtools`, not deleted: its
+  // probes are still the fastest way to diagnose a phone, and it is no longer what anyone sees
+  // first.
   return (
-    <DeviceHarness
-      onOpenPriority={() => navigate('priority')}
+    <HomeScreen
+      session={session}
+      label={label}
+      state={state}
+      busy={busy}
+      backend={device.backend}
+      deviceLine={
+        deviceInfo
+          ? `${deviceInfo.manufacturer} ${deviceInfo.model} · Android ${deviceInfo.release} · targetSdk ${deviceInfo.targetSdk}`
+          : 'MockDevice — nothing here touches a real phone'
+      }
+      onStartStudy={() => void runSentence(STUDY_COMMAND)}
+      onStartSleep={() => void runSentence(SLEEP_COMMAND)}
       onOpenActive={() => {
         void refreshContext();
         navigate('activeContext');
       }}
-      onStarted={(next) => {
-        setState(next.state);
-        setResults(next.results);
-        setReasons(next.explained.map((e) => e.reason));
-        setPriority(next.priority);
-        setEmergency(null);
-        void refreshContext();
-      }}
+      onOpenPriority={() => navigate('priority')}
+      onOpenDevTools={() => navigate('devtools')}
     />
   );
 }
@@ -259,10 +351,13 @@ export default function App() {
 function DeviceHarness({
   onOpenPriority,
   onOpenActive,
+  onBack,
   onStarted,
 }: {
   onOpenPriority: () => void;
   onOpenActive: () => void;
+  /** A6.6 — back to Home, now that the harness is a route rather than the entry point. */
+  onBack: () => void;
   onStarted: (r: {
     state: ContextState;
     results: ActionResult[];
@@ -541,6 +636,10 @@ function DeviceHarness({
       )}
 
       <View style={styles.divider} />
+
+      <Pressable style={[styles.btn, styles.btnWide]} onPress={onBack}>
+        <Text style={styles.btnText}>← Back to Ally</Text>
+      </Pressable>
 
       <Text style={styles.section}>DND capability (T3)</Text>
       <Text style={styles.info}>
