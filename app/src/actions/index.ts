@@ -41,5 +41,7 @@ export type {
   EmergencyDeps,
   CallLogAnalyser,
 } from './EmergencyMonitor';
-export { summarisePlan, summariseRestore } from './summaries';
+export { explainResults, reasonsFor } from './provenance';
+export type { ExplainedResult } from './provenance';
+export { summarisePlan, summariseRestore, unreadableRestore } from './summaries';
 export type { PlanSummary, RestoreSummary } from './summaries';

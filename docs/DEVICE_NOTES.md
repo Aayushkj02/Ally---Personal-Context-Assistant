@@ -781,3 +781,100 @@ final cycle the file is correct:
 - The harness's DND readout at the top of the home screen goes **stale** — it showed
   `current: priority` while `zen_mode` was 0. A display bug in the temporary Phase 2 harness,
   which A6.6 removes; the executor and the device were both correct.
+
+---
+
+## Phase 4 — learned preferences on the device (2026-08-31, SM-S928B, Android 16 / API 36)
+
+Read with `adb shell settings get`, `adb shell dumpsys notification`, `run-as cat` on the app's own
+`shared_prefs`, and by pulling `ally.db` off the device and querying it directly. None of it is an
+app log.
+
+### The gate: same sentence, different phone, because Ally remembered
+
+Three runs of the identical command, `"I'm going to study for two hours."`:
+
+| taught preference | brightness applied | what it means |
+|---|---|---|
+| none | **102** (40%) | `study.json`'s default |
+| brightness = 25% | **64** (25%) | the preference won |
+| none (deleted again) | **102** (40%) | back to the default |
+
+64 and 102 are what makes this a real test: 25% and 40% are visibly different raw values, so the
+device itself distinguishes "the preference reached Android" from "it did not". Teaching 40% would
+have looked identical either way.
+
+The row was confirmed in the device's own SQLite before the run, not from a screen:
+
+```json
+{"capability":"brightness","value":"25","source":"user",
+ "sourceCommand":"Remember that I prefer 25% brightness during study"}
+```
+
+### Restoration is unaffected by a value being learned
+
+187 → **64** → force-stop (pid 18066 → 20032) → reopen → End → **187 exactly**, zen 0, policy back
+to `ALARMS, MEDIA`. A preference the user taught Ally is still Ally's to give back.
+
+### Provenance, on screen
+
+The Active Context screen, mid-context, with a taught brightness and a default DND:
+
+```text
+dnd          Applied                       off → priority     from system defaults
+brightness   Applied                       73 → 25            from your active profile
+ringer       Not supported on this device  null → null        from system defaults
+```
+
+Two rows, one list, two different origins. That line is `PlannedAction.reason`, verbatim.
+
+### Stored priority reaches Android
+
+With `Mom` stored on calls and SMS for Study (both rows confirmed in `priority_preference`):
+
+| | priorityCategories |
+|---|---|
+| before | `ALARMS, MEDIA` |
+| Study active | `ALARMS, MESSAGES, CALLS, REPEAT_CALLERS` |
+| after End | `ALARMS, MEDIA` |
+
+`priorityCallSenders` and `priorityMessageSenders` both `PRIORITY_SENDERS_STARRED`.
+`REPEAT_CALLERS` is present and was never asked for — it is Android's own safety net, and the
+request type makes turning it off unrepresentable. WhatsApp stayed `Remembered, not enforced`
+throughout, on both the Priority screen and the Active Context screen.
+
+### A real failure, and what it taught us
+
+**expo-sqlite died mid-session.** After navigating to the Priority screen and back, pressing End
+produced:
+
+```text
+E ReactNativeJS: Uncaught (in promise): "Error: Call to function
+'NativeDatabase.prepareAsync' has been rejected.
+  → Caused by: java.lang.NullPointerException"
+```
+
+The context did NOT end. The phone stayed at 64/zen 1 with a red toast and no explanation, and
+pressing End again did exactly the same thing. **Force-stopping and reopening fixed it
+completely** — the fresh process restored 187, zen 0 and the original policy exactly, because
+restoration only ever needed the session id.
+
+Two separate things came out of this:
+
+- **The root cause is upstream, in `src/memory/database/index.ts` (Dhrey's).** `getDatabase()`
+  caches a module-level handle with no liveness check and no reconnect, so once the native handle
+  dies every query fails until the process restarts. NOT fixed here — reported.
+- **The reporting was Aayush's fault, and is fixed.** That snapshot read sits outside
+  `restoreSession`'s per-row try/catch, so the rejection escaped `endContext()` entirely. It now
+  comes back as PARTIAL, retryable, rows kept, with a sentence the user can act on. Deliberately
+  NOT `summariseRestore([])`, which is IDLE and safe-to-clear — silently swallowing this would have
+  reported the context cleanly ended and dropped the very rows the phone still needed.
+
+### Two smaller things worth knowing before the demo
+
+- **Taps land unreliably for a second or two after a scroll**, and immediately after a
+  force-stop the JS bundle is still loading, so an early tap does nothing. Several "the button
+  did not work" moments in this session were one of those two, not a bug. Wait, then tap.
+- Restore correctly leaves **memories alone**: after a clean End the taught preference and the
+  stored priority contacts are still in the database, while `device_snapshot` is empty and
+  `ally_dnd_policy.xml` is `<map />`. Snapshots are collateral; preferences are the product.

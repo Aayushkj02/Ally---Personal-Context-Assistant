@@ -93,6 +93,26 @@ export interface RestoreSummary {
   safeToClear: boolean;
 }
 
+/**
+ * The summary for a restore that could not even be attempted, because the snapshots were
+ * unreadable.
+ *
+ * NOT `summariseRestore([])`. An empty result set means "there was nothing to put back", which is
+ * IDLE and safe to clear. This means "we could not find out what to put back", which is the
+ * opposite: the phone is still changed, the rows must be kept, and the only honest state is
+ * PARTIAL. Collapsing the two would report a context as cleanly ended while Ally was still
+ * holding the user's settings — the same distinction EmergencyMonitor draws between `ok: false`
+ * and `detected: false` (ADR-122).
+ */
+export function unreadableRestore(): RestoreSummary {
+  return {
+    total: 0,
+    byStatus: tally([]),
+    state: 'PARTIAL',
+    safeToClear: false,
+  };
+}
+
 export function summariseRestore(results: ActionResult[]): RestoreSummary {
   const byStatus = tally(results);
 

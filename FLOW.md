@@ -228,6 +228,60 @@ is still `pendingCapability` until T5 (ADR-104), so a Study plan cannot be 3/3 u
 ("off") and `brightness` (73) landed in `device_snapshot`; `ringer` correctly produced none,
 because an action that never ran has nothing to restore.
 
+### 5.1 A remembered preference, on the device side — *Aayush, Phase 4*
+
+Nothing in the execution path changed for Phase 4, and that is the finding rather than a shortfall.
+A value the user taught Ally and a value from `study.json` arrive as the same `PlannedAction`, and
+the executor is not told which is which — the precedence was already settled upstream:
+
+```
+preference row            (Dhrey — profileRepository)
+      ↓  loadProfileContext()
+      ↓  resolve()        command > override > profile > default   (Dhrey)
+      ↓  buildActionPlan() → PlannedAction{ value, reason }        (Dhrey)
+      ↓  ─────────────── contract boundary 2 ───────────────
+      ↓  startContext()                                            (AAYUSH from here)
+      ↓  snapshot → apply → read back
+      ↓  Android
+```
+
+**The executor deliberately cannot tell a taught value from a default.** If it could, it would be
+deciding policy, and there would be two places that know what the user prefers. `resolve()` is the
+only one.
+
+**What DID have to change is provenance** (ADR-126). `ResolvedEntry.source` and `entry.reason`
+already carried "where did this come from", and `buildActionPlan()` copies the sentence onto every
+`PlannedAction` — then it stopped, because `ActionResult` has no field for it and is frozen. So the
+moment the executor turned a planned action into an outcome, the answer to *why is my phone like
+this* was gone. `explainResults(plan, results)` pairs them back up positionally,
+`startContext()` returns it as `explained`, and the Active Context screen renders it under each
+row. Derived on demand, never stored, sentences copied verbatim.
+
+**Priority does not travel as a `PlannedAction`, and cannot.** "Mom can call me during Study" is
+not a capability value — Android has no per-contact Do Not Disturb exception, so it is a rewrite of
+`NotificationManager.Policy`, which the frozen `CAPABILITIES` list has no member for. It reaches
+the device through the lifecycle's injected `applyPriority` thunk (ADR-119), after the plan and
+never when the plan applied nothing. Restoring it is §6.
+
+**Removing a preference needs no device-side work at all.** The next activation simply resolves
+without it, because nothing on this side of the boundary caches what the user prefers.
+
+**Mid-context changes are NOT defined by any interface, and Phase 4 does not invent them.**
+`resolve()` is called from exactly one place, `activateFromText`, which also calls `startSession` —
+so resolving and starting a context are the same act, and there is no way to re-resolve against a
+running session. The frozen `SESSION_STATES` contains `OVERRIDING` and nothing sets it. Shlok's
+parser already emits `operation: 'modify'` and consults `ctx.activeActivity` to choose it; nothing
+consumes either. The one thing the device layer can say about it today is a warning:
+
+| expressing the change as… | what the snapshot ends up holding |
+|---|---|
+| another run on the **same** `sessionId` | the user's original — first-write-wins protects it |
+| a fresh `activateFromText()` | **the value Ally set**, recorded as if it were the user's |
+
+The second row is a live trap: re-activating starts a *second* session, `getActiveContext()`
+returns the new one, and the genuine original is stranded on a first session nothing will ever end.
+Both rows are pinned by tests in `src/actions/__tests__/learnedPreferences.test.ts`.
+
 ---
 
 ## 6. Restoration & override expiry — *Aayush*

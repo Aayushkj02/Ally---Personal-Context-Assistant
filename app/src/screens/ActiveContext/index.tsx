@@ -48,8 +48,20 @@ export interface ActiveContextScreenProps {
   label: string;
   state: ContextState;
   results: ActionResult[];
+  /**
+   * Why each change was made, positionally aligned with `results` (A4.2). Comes from
+   * `startContext().explained`; absent for a restore, which is driven by snapshots rather than
+   * by a plan and therefore has no reason to give.
+   */
+  reasons?: readonly (string | null)[];
   priority: ChannelEnforcement[] | null;
   emergency: EmergencyStatus | null;
+  /**
+   * Set when ending could not even be attempted — the snapshots were unreadable. There are no
+   * result rows in that case, so this sentence is all the user has, and saying nothing would
+   * leave them looking at a phone Ally is still holding.
+   */
+  endError?: string | null;
   busy?: boolean;
   onEnd: () => void;
   onCheckEmergency: () => void;
@@ -70,8 +82,10 @@ export default function ActiveContextScreen({
   label,
   state,
   results,
+  reasons,
   priority,
   emergency,
+  endError = null,
   busy = false,
   onEnd,
   onCheckEmergency,
@@ -141,6 +155,10 @@ export default function ActiveContextScreen({
                 {String(r.beforeValue)} → {String(r.afterValue)}
               </Text>
               <Text style={s.rowMessage}>{r.message}</Text>
+              {/* A4.2: where the value came from, verbatim from the plan. Rendered separately
+                  from the message because they answer different questions — the message says
+                  what the phone did, this says why Ally asked for it. */}
+              {reasons?.[i] ? <Text style={s.rowReason}>{reasons[i]}</Text> : null}
             </View>
           );
         })}
@@ -178,6 +196,15 @@ export default function ActiveContextScreen({
           <Text style={s.secondaryText}>Check recent calls</Text>
         </Pressable>
       </View>
+
+      {endError ? (
+        <View style={s.errorCard}>
+          <Text style={s.errorText}>{endError}</Text>
+          <Text style={s.rowMessage}>
+            Nothing was lost. Try ending again — reopening Ally first is what has fixed this before.
+          </Text>
+        </View>
+      ) : null}
 
       <Pressable style={[s.end, busy && s.endBusy]} onPress={onEnd} disabled={busy}>
         <Text style={s.endText}>{busy ? 'Putting your phone back…' : `End ${label}`}</Text>
@@ -218,6 +245,7 @@ const s = StyleSheet.create({
   rowTitle: { ...typography.presets.bodyMedium, color: colors.textPrimary },
   rowDetail: { fontSize: typography.size.sm, color: colors.textSecondary },
   rowMessage: { fontSize: typography.size.xs, color: colors.textTertiary },
+  rowReason: { fontSize: typography.size.xs, color: colors.textTertiary, fontStyle: 'italic' },
   badge: { paddingHorizontal: spacing.md, paddingVertical: spacing.xs, borderRadius: radius.pill },
   badgeText: {
     color: colors.textInverse,
@@ -238,6 +266,16 @@ const s = StyleSheet.create({
     alignItems: 'center',
   },
   endBusy: { backgroundColor: colors.neutral },
+  errorCard: {
+    marginTop: spacing.md,
+    gap: spacing.xs,
+    backgroundColor: colors.surface,
+    borderRadius: radius.lg,
+    padding: spacing.lg,
+    borderWidth: 1,
+    borderColor: colors.danger,
+  },
+  errorText: { ...typography.presets.bodyMedium, color: colors.danger },
   endText: {
     color: colors.textInverse,
     fontWeight: typography.weight.bold,

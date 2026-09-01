@@ -31,10 +31,12 @@ import type {
   SessionState,
 } from '../types';
 import { executePlan, restoreSession, type ActionProgress, type BorrowedPolicy } from './executors';
+import { explainResults, type ExplainedResult } from './provenance';
 import type { SnapshotStore } from './SnapshotStore';
 import {
   summarisePlan,
   summariseRestore,
+  unreadableRestore,
   type PlanSummary,
   type RestoreSummary,
 } from './summaries';
@@ -124,6 +126,16 @@ export interface StartContextResult {
    * null means no applier was wired, not that priority succeeded or failed.
    */
   priority: ChannelEnforcement[] | null;
+  /**
+   * Each outcome paired with the reason its planned action carried — "from your active profile"
+   * for a value the user taught Ally, "from system defaults" for one they never chose (A4.2).
+   *
+   * Derived, not stored, and the sentences are Dhrey's verbatim. It rides on the result because
+   * this is the only place that holds BOTH the plan and the outcomes; a caller that wanted it
+   * later would have to keep the plan alive itself, and the first one that forgot would silently
+   * show a phone full of changes with nothing to explain them.
+   */
+  explained: ExplainedResult[];
 }
 
 export interface EndContextResult {
@@ -135,6 +147,12 @@ export interface EndContextResult {
   cleared: boolean;
   /** Retained rows mean the caller may call endContext() again to finish the job. */
   retryable: boolean;
+  /**
+   * Plain language for a restore that could not be ATTEMPTED — the snapshots themselves were
+   * unreadable. Null on every other outcome, including a restore that ran and failed, which is
+   * described per row in `results` instead.
+   */
+  error: string | null;
 }
 
 /** A hook must never be able to turn a real device outcome into a thrown error. */
@@ -200,7 +218,7 @@ export async function startContext(
     await fire(hooks?.onActivated, () => hooks?.onActivated?.(sessionId, state));
   }
 
-  return { sessionId, state, results, summary, priority };
+  return { sessionId, state, results, summary, priority, explained: explainResults(plan, results) };
 }
 
 export interface EndContextOptions {
@@ -230,12 +248,37 @@ export async function endContext(
 ): Promise<EndContextResult> {
   const { registry, snapshots, hooks, onProgress } = deps;
 
-  const results = await restoreSession(sessionId, {
-    registry,
-    snapshots,
-    onProgress,
-    policy: deps.policy,
-  });
+  // THE SNAPSHOT READ IS ITSELF FALLIBLE, and was observed failing on the Samsung: expo-sqlite
+  // rejected with a NullPointerException, the rejection escaped endContext(), and the app showed
+  // a red toast while the phone stayed dimmed and silent with no explanation and no way forward.
+  //
+  // A restore that cannot start is not a restore that found nothing. Reported as PARTIAL with the
+  // rows untouched, so the state is honest and ending again — including from a fresh process,
+  // which is what actually recovered it — still finishes the job.
+  let results: ActionResult[];
+  try {
+    results = await restoreSession(sessionId, {
+      registry,
+      snapshots,
+      onProgress,
+      policy: deps.policy,
+    });
+  } catch (e) {
+    const summary = unreadableRestore();
+    await fire(hooks?.onPartial, () => hooks?.onPartial?.(sessionId, []));
+    return {
+      sessionId,
+      state: summary.state,
+      results: [],
+      summary,
+      cleared: false,
+      retryable: true,
+      error:
+        e instanceof Error
+          ? `Ally could not read what it needs to put your phone back: ${e.message}`
+          : 'Ally could not read what it needs to put your phone back.',
+    };
+  }
   const summary = summariseRestore(results);
   const state: ContextState = summary.state;
 
@@ -257,6 +300,7 @@ export async function endContext(
     summary,
     cleared,
     retryable: !summary.safeToClear,
+    error: null,
   };
 }
 
