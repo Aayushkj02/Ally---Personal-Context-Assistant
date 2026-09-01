@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  OWNER: Aayush. Task A7.2.
+
+  These two strings are shown by ANDROID, not by Ally: the label and description on the system's
+  own accessibility screen, which is where the user grants access. They are the only account of
+  this service the user sees before deciding, so they say plainly what it watches, what it does,
+  and what it does not do. Prefixed `ally_` because a library's resources merge into the app's.
+-->
+<resources>
+  <string name="ally_focus_guard_label">Ally Focus Guard</string>
+  <string name="ally_focus_guard_description">Lets Ally notice when you open an app you chose to restrict during Study Mode, and return you to your home screen. Ally reads only the name of the app in front — never the contents of your screen.</string>
+</resources>

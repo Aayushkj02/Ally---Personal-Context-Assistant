@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  OWNER: Aayush. Task A7.2 — Focus Guard accessibility service configuration.
+
+  EVERY ATTRIBUTE HERE IS SET TO TAKE AS LITTLE AS POSSIBLE:
+
+  accessibilityEventTypes="typeWindowStateChanged"
+      The one event that says "a different app is in front". Not typeAllMask, which would deliver
+      view clicks, text changes and scrolls — i.e. the contents of everything the user does on the
+      phone — for no benefit to this feature.
+
+  canRetrieveWindowContent="false"
+      Ally never reads the screen. This is the attribute that makes that a platform guarantee
+      rather than a promise in a comment: with it false, getRootInActiveWindow() returns nothing
+      even if someone later adds a call to it.
+
+  notificationTimeout="0"
+      No throttling. This value is the minimum gap the framework enforces between similar events,
+      so any non-zero value is added directly to how long a restricted app stays on screen before
+      Ally reacts — and that delay is the whole question this feature lives or dies on. The
+      anti-loop debounce is done in FocusGuardService, where it can be scoped per package, instead.
+
+  No android:packageNames filter
+      Scoping the service to the two demo packages here would be tighter still, but the restricted
+      list is configurable at runtime (A7.9) and this file is baked in at build time, so the two
+      would drift. The runtime check in FocusGuard.restrictedLabel() is the real filter. A
+      production version should narrow this with setServiceInfo() when the list changes.
+-->
+<accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
+    android:accessibilityEventTypes="typeWindowStateChanged"
+    android:accessibilityFeedbackType="feedbackGeneric"
+    android:canRetrieveWindowContent="false"
+    android:description="@string/ally_focus_guard_description"
+    android:notificationTimeout="0" />
