@@ -41,6 +41,8 @@ export type {
   EmergencyDeps,
   CallLogAnalyser,
 } from './EmergencyMonitor';
+export { mirrorContextStart, mirrorContextEnd, createRecordingTransport } from './sessionMirror';
+export type { SessionMirrorTransport, MirrorContext, MirrorOutcome } from './sessionMirror';
 export { explainResults, reasonsFor } from './provenance';
 export type { ExplainedResult } from './provenance';
 export { summarisePlan, summariseRestore, unreadableRestore } from './summaries';

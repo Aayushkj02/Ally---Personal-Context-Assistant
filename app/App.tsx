@@ -33,10 +33,16 @@ import {
   startContext,
   endContext as endContextLifecycle,
   createRepositorySnapshotStore,
+  mirrorContextStart,
+  mirrorContextEnd,
   type ExplainedResult,
   type LifecycleHooks,
 } from './src/actions';
 import { activateFromText } from './src/services/contextOrchestrator';
+// A6.5: Dhrey's session-sync client (D-V10), used unmodified. It had no callers until Phase 6 —
+// the transport was built, nothing drove it. SOFTWARE ONLY: the physical Office Kit is deferred
+// until the team qualifies for the Pune round.
+import { sessionSync } from './src/services/sessionSync';
 import { useRoute } from './src/navigation';
 import { ActiveContextScreen } from './src/screens';
 import { applyPriorityForActivity } from './src/services/priorityIntegration';
@@ -206,6 +212,9 @@ export default function App() {
               // has to be able to give it back even with no `dnd` row to carry it (ADR-125).
               policy: borrowedPolicy,
             });
+
+            // A6.5: software/session-sync mirror of the ending. Not Office Kit hardware.
+            void mirrorContextEnd(r, sessionSync, { profileId: session.profileId });
             setResults(r.results);
             setReasons([]);
             setState(r.state);
@@ -404,7 +413,7 @@ function DeviceHarness({
               })
             : device;
 
-        const { state, results, summary, priority, explained } = await startContext(outcome.plan, {
+        const started = await startContext(outcome.plan, {
           registry,
           // Durable: Dhrey's device_snapshot table, reached through the SnapshotStore port.
           snapshots: createRepositorySnapshotStore(),
@@ -422,7 +431,17 @@ function DeviceHarness({
 
         // A-V9: hand the outcome to the shell so the Active Context screen shows the real thing
         // rather than recomputing it. The shell holds it for display only.
+        const { state, results, summary, priority, explained } = started;
+
         onStarted({ state, results, explained, priority });
+
+        // A6.5: push what just happened to the laptop. SOFTWARE / SESSION-SYNC ONLY — this proves
+        // nothing about the physical Office Kit, which the team does not have. Fire-and-forget on
+        // top of a transport that already swallows, so a dead bridge cannot touch the phone.
+        void mirrorContextStart(outcome.plan, started, sessionSync, {
+          profileId: outcome.profile.id,
+          durationMinutes: outcome.intent.durationMinutes,
+        });
 
         setLog(results.slice().reverse());
         setProbe({
@@ -473,10 +492,17 @@ function DeviceHarness({
 
       // One call. Restore, summarise, clear-only-if-clean and the session hook are all the
       // coordinator's job — the harness no longer decides when it is safe to drop rows.
-      const { state, results, summary, cleared, retryable } = await endContextLifecycle(
-        active.session.id,
-        { registry: device, snapshots, hooks: sessionHooks, policy: borrowedPolicy },
-      );
+      const ended = await endContextLifecycle(active.session.id, {
+        registry: device,
+        snapshots,
+        hooks: sessionHooks,
+        policy: borrowedPolicy,
+      });
+      const { state, results, summary, cleared, retryable } = ended;
+
+      // A6.5: mirror the ending too, so a second screen sees WHAT went back and not merely that
+      // something did. Software/session-sync only.
+      void mirrorContextEnd(ended, sessionSync, { profileId: active.session.profileId });
 
       setLog(results.slice().reverse());
       setProbe({
