@@ -5,7 +5,7 @@ import { colors, radius, spacing } from '../theme';
 
 export interface StatusRowProps {
   label: string;
-  status: 'pending' | 'success' | 'failed' | 'idle';
+  status: 'pending' | 'success' | 'failed' | 'idle' | 'unsupported';
   message?: string;
   style?: any;
 }
@@ -17,6 +17,8 @@ export const StatusRow = ({ label, status, message, style }: StatusRowProps) => 
         return colors.primary;
       case 'failed':
         return colors.danger;
+      case 'unsupported':
+        return colors.warning;
       case 'pending':
         return colors.textSecondary;
       default:
@@ -30,6 +32,8 @@ export const StatusRow = ({ label, status, message, style }: StatusRowProps) => 
         return '✓ Success';
       case 'failed':
         return '✗ Failed';
+      case 'unsupported':
+        return '⚠ Unsupported';
       case 'pending':
         return '⋯ Pending';
       default:

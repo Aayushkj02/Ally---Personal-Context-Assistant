@@ -3,20 +3,29 @@ import type { ContextSession, SessionState } from '../../types';
 
 export const sessionRepository = {
   async create(session: ContextSession): Promise<void> {
-    const db = await getDatabase();
-    await db.runAsync(
-      'INSERT INTO context_session (id, profileId, startedAt, endsAt, status) VALUES (?, ?, ?, ?, ?)',
-      [session.id, session.profileId, session.startedAt, session.endsAt, session.status],
-    );
+    try {
+      const db = await getDatabase();
+      await db.runAsync(
+        'INSERT INTO context_session (id, profileId, startedAt, endsAt, status) VALUES (?, ?, ?, ?, ?)',
+        [session.id, session.profileId, session.startedAt, session.endsAt, session.status],
+      );
+    } catch (e) {
+      throw new Error(`Persistence failed: ${e instanceof Error ? e.message : 'Unknown error'}`);
+    }
   },
 
   async getById(id: string): Promise<ContextSession | null> {
-    const db = await getDatabase();
-    const row = await db.getFirstAsync<ContextSession>(
-      'SELECT id, profileId, startedAt, endsAt, status FROM context_session WHERE id = ?',
-      [id],
-    );
-    return row || null;
+    try {
+      const db = await getDatabase();
+      const row = await db.getFirstAsync<ContextSession>(
+        'SELECT id, profileId, startedAt, endsAt, status FROM context_session WHERE id = ?',
+        [id],
+      );
+      return row || null;
+    } catch (e) {
+      console.warn('Failed to read session:', e);
+      return null;
+    }
   },
 
   /**
@@ -27,15 +36,20 @@ export const sessionRepository = {
    * study context sets endsAt at creation, so it was never reported as active (D-V7).
    */
   async getActive(now: number = Date.now()): Promise<ContextSession | null> {
-    const db = await getDatabase();
-    const row = await db.getFirstAsync<ContextSession>(
-      `SELECT id, profileId, startedAt, endsAt, status FROM context_session
-        WHERE (endsAt IS NULL OR endsAt > ?)
-          AND status NOT IN ('IDLE', 'ERROR')
-        ORDER BY startedAt DESC, rowid DESC LIMIT 1`,
-      [now],
-    );
-    return row || null;
+    try {
+      const db = await getDatabase();
+      const row = await db.getFirstAsync<ContextSession>(
+        `SELECT id, profileId, startedAt, endsAt, status FROM context_session
+          WHERE (endsAt IS NULL OR endsAt > ?)
+            AND status NOT IN ('IDLE', 'ERROR')
+          ORDER BY startedAt DESC, rowid DESC LIMIT 1`,
+        [now],
+      );
+      return row || null;
+    } catch (e) {
+      console.warn('Failed to read active session:', e);
+      return null;
+    }
   },
 
   /** Same, scoped to one context. */
@@ -43,42 +57,60 @@ export const sessionRepository = {
     profileId: string,
     now: number = Date.now(),
   ): Promise<ContextSession | null> {
-    const db = await getDatabase();
-    const row = await db.getFirstAsync<ContextSession>(
-      `SELECT id, profileId, startedAt, endsAt, status FROM context_session
-        WHERE profileId = ?
-          AND (endsAt IS NULL OR endsAt > ?)
-          AND status NOT IN ('IDLE', 'ERROR')
-        ORDER BY startedAt DESC, rowid DESC LIMIT 1`,
-      [profileId, now],
-    );
-    return row || null;
+    try {
+      const db = await getDatabase();
+      const row = await db.getFirstAsync<ContextSession>(
+        `SELECT id, profileId, startedAt, endsAt, status FROM context_session
+          WHERE profileId = ?
+            AND (endsAt IS NULL OR endsAt > ?)
+            AND status NOT IN ('IDLE', 'ERROR')
+          ORDER BY startedAt DESC, rowid DESC LIMIT 1`,
+        [profileId, now],
+      );
+      return row || null;
+    } catch (e) {
+      console.warn('Failed to read active session for profile:', e);
+      return null;
+    }
   },
 
   /** Full history for one context, newest first. Ended sessions are never deleted. */
   async listForProfile(profileId: string): Promise<ContextSession[]> {
-    const db = await getDatabase();
-    return await db.getAllAsync<ContextSession>(
-      `SELECT id, profileId, startedAt, endsAt, status FROM context_session
-        WHERE profileId = ? ORDER BY startedAt DESC, rowid DESC`,
-      [profileId],
-    );
+    try {
+      const db = await getDatabase();
+      return await db.getAllAsync<ContextSession>(
+        `SELECT id, profileId, startedAt, endsAt, status FROM context_session
+          WHERE profileId = ? ORDER BY startedAt DESC, rowid DESC`,
+        [profileId],
+      );
+    } catch (e) {
+      console.warn('Failed to read session list:', e);
+      return [];
+    }
   },
   async update(session: ContextSession): Promise<void> {
-    const db = await getDatabase();
-    await db.runAsync('UPDATE context_session SET endsAt = ?, status = ? WHERE id = ?', [
-      session.endsAt,
-      session.status,
-      session.id,
-    ]);
+    try {
+      const db = await getDatabase();
+      await db.runAsync('UPDATE context_session SET endsAt = ?, status = ? WHERE id = ?', [
+        session.endsAt,
+        session.status,
+        session.id,
+      ]);
+    } catch (e) {
+      throw new Error(`Persistence failed: ${e instanceof Error ? e.message : 'Unknown error'}`);
+    }
   },
 
   async endSession(id: string, status: SessionState, endsAt: number): Promise<void> {
-    const db = await getDatabase();
-    await db.runAsync('UPDATE context_session SET endsAt = ?, status = ? WHERE id = ?', [
-      endsAt,
-      status,
-      id,
-    ]);
+    try {
+      const db = await getDatabase();
+      await db.runAsync('UPDATE context_session SET endsAt = ?, status = ? WHERE id = ?', [
+        endsAt,
+        status,
+        id,
+      ]);
+    } catch (e) {
+      throw new Error(`Persistence failed: ${e instanceof Error ? e.message : 'Unknown error'}`);
+    }
   },
 };
