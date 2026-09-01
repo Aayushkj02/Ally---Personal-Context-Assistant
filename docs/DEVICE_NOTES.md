@@ -1106,10 +1106,50 @@ Ally is holding some of your settings. They go back when this ends.
 That is the A6.2 target text, rendered from `getActiveContext()` and the persisted `endsAt` on a
 process with no memory of having started anything.
 
-Opening Active Context on that same fresh process honestly reported **`0/0 changes applied` /
-"Nothing yet."** — the per-action results live in memory and the process restarted. The countdown
-still worked because it comes from the database. That is the correct behaviour, not a bug, and it is
-the same honesty the Phase 2 notes recorded.
+### CORRECTION — the recovered Active Context was wrong, and I had called it correct
+
+An earlier revision of this file recorded the following as acceptable:
+
+> Opening Active Context on that same fresh process honestly reported `0/0 changes applied` /
+> "Nothing yet." ... That is the correct behaviour, not a bug.
+
+**That was wrong.** It was written from the code, not from the phone. Measured on the device, with
+the session recovered and that exact text on screen:
+
+```text
+$ adb shell settings get system screen_brightness
+64                     # baseline was 187
+$ adb shell settings get global zen_mode
+1                      # baseline was 0  (ZEN_MODE_IMPORTANT_INTERRUPTIONS)
+$ adb shell dumpsys notification | grep mInterruptionFilter
+mInterruptionFilter=2  # baseline was 1
+```
+
+The phone was dimmed and in priority DND while Active Context said `0/0 changes applied` and
+"Nothing yet." The reasoning that excused it — that the screen fabricated nothing — missed the
+distinction that matters: **not fabricating is not the same as being true.** Under-reporting is
+still a false statement about someone's phone, and this one has a cost. Someone who believes Ally
+is holding nothing has no reason to press End, and their phone stays dim and silent.
+
+Fixed in `heldSettings.ts` (ADR-129): a recovered session now reads `device_snapshot` back and
+reports what it is holding. The snapshots were already the durable record — restore reads them, so
+a held row is exactly a row that will be put back. Three statements are kept apart, because
+collapsing any two is how this returns:
+
+| On disk | What the screen says |
+|---|---|
+| snapshots exist | `Ally is holding 2 of your settings` + a row per capability, labelled **Held** |
+| no snapshots | `Ally is not holding any of your settings.` |
+| store unreadable | `Ally cannot read what it is holding right now` — never "not holding anything" |
+
+Held is **not** `applied`. A snapshot proves Ally captured the user's value, not that its own change
+succeeded, so held rows do not render through `StatusChip` and carry no `ActionStatus`.
+
+**Software-verified, NOT yet re-verified on the phone.** 11 tests in `heldSettings.test.ts`, checked
+red-green by reintroducing the collapse (2 failures). The on-device re-run of kill → reopen against
+the fixed bundle has **not happened yet** — the run was stopped part-way because a WhatsApp voice
+call became active on the phone and it was not appropriate to keep injecting taps. This line stays
+here until that re-run is done.
 
 ### A6.5 — the laptop mirror is SOFTWARE ONLY
 
@@ -1129,6 +1169,53 @@ is now driven from `startContext` / `endContext`. That is session-sync plumbing 
 
 The screens use `StatusChip` instead, and a test fails if `StatusRow` is ever imported into one.
 His component is untouched — this is a note for whoever owns it, not a change made on his behalf.
+
+### End and restore — re-measured 2026-09-01 18:00–18:07
+
+A second full run on the same phone, against the Phase 6 branch. Baseline, active and restored
+values reproduced the table above exactly:
+
+```text
+baseline   brightness 187   mode 0   zen 0   mInterruptionFilter 1
+Study on   brightness  64   mode 0   zen 1   mInterruptionFilter 2   implicit_com.ally.assistant TRUE
+killed     brightness  64   mode 0   zen 1                            (settings are the phone's, not the app's)
+End        brightness 187   mode 0   zen 0   mInterruptionFilter 1   ZEN_MODE_OFF
+```
+
+Afterwards, read straight out of `files/SQLite/ally.db`: latest `context_session` row `IDLE`,
+`device_snapshot` **empty**. Snapshots are cleared only after a fully clean restore, so an empty
+table here is itself the evidence that the restore was complete (ADR-117).
+
+**Restoring does not un-hold the phone until it finishes, and it is not instant.** The end took
+long enough to be noticeable. Worth one deliberate check with a finger before the demo — do not
+assume the tap didn't land and press again.
+
+### An adb artifact, called out so nobody mistakes it for a bug
+
+Short synthetic taps (`adb shell input tap`) on the End control repeatedly produced no visible
+change, while `input swipe x y x y 200` — a press with dwell — worked. Other controls on the same
+screen (`Check recent calls`, `Back`) responded to plain `input tap` in the same run, so this is
+**not** a dead button.
+
+This has not been characterised, and it may well be an artifact of synthetic input being shorter
+than a human press rather than a product defect. It is written down because it wasted time twice and
+because the wrong conclusion — "End is broken" — is an easy one to reach from it. **A human finger
+has not yet been tested against it.**
+
+### Run stopped early — a real call arrived
+
+The second device run was stopped part-way. `dumpsys window` showed
+`com.whatsapp/...VoipActivityV2` focused and `dumpsys telecom` a call in `state=ACTIVE`: a live
+WhatsApp voice call on the phone. Injecting taps into someone's call is not acceptable, so device
+interaction ended there.
+
+State was confirmed clean before stopping: settings at baseline, session `IDLE`, snapshots empty.
+The Study tap made during that window never took effect — brightness and zen never moved — so no
+session was left dangling.
+
+**Still outstanding on the device:** the kill → reopen re-run against the fixed bundle (ADR-129),
+and the Sleep/alarm path on the new Home screen. Phase 5 validated the alarm on this phone; it has
+**not** been re-exercised from the Phase 6 entry point.
 
 ### Small things worth knowing before the demo
 

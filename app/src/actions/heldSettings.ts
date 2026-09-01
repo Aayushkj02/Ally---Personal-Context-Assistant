@@ -27,7 +27,7 @@
  * this capability", not "Ally successfully applied its own". Those differ for a capability that
  * snapshotted and then failed. So the vocabulary here is HELD, never `applied` — this module does
  * not manufacture `ActionResult`s it never saw, and the screen must not present its output as
- * execution results (ADR-128).
+ * execution results (ADR-129).
  */
 
 import type { Capability, CapabilityValue, DeviceSnapshot } from '../types';

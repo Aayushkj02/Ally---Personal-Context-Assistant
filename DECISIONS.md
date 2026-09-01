@@ -1107,3 +1107,39 @@ Because entries never move and IDs never collide, a merge conflict here is alway
   hardware, and says so where a reader of a green run would see it. When the physical kit arrives
   it connects behind the same five methods with no change to the session model — which is the
   actual deliverable of A6.9, and is not the same as having tested one.
+
+### ADR-129 — A recovered session reports what it HOLDS, from the snapshots
+
+- **Date:** 2026-09-01 · **Author:** Aayush · **Phase:** 6 · **Status:** Accepted
+- **Decision:** when a context is recovered after a process death and there are no in-memory
+  results, Active Context reports what Ally is holding, read back from `device_snapshot` via
+  `heldForSession()`. It no longer prints `0/0 changes applied` or "Nothing yet" in that case.
+- **Reason — measured on SM-S928B, and it corrects an earlier note of mine.** Start Study, kill
+  Ally, reopen. The session and countdown return from the persisted row. `results` does not, because
+  it lives in React state in the shell. The screen then read `0/0 changes applied` /
+  "Nothing yet." while `settings get system screen_brightness` returned **64** and
+  `settings get global zen_mode` returned **1** — the phone was genuinely dimmed and in priority
+  DND. The Phase 6 notes had recorded that display as "correct behaviour, not a bug" on the grounds
+  that it did not fabricate anything. That was wrong, and the distinction it missed is the one that
+  matters: not fabricating is not the same as being true. Under-reporting is still a false statement
+  about someone's phone, and this one costs them something real — a user who believes Ally is
+  holding nothing has no reason to press End.
+- **No second source of truth.** The snapshots were already the durable record: `device_snapshot`
+  stores each capability's pre-change value, is written through `snapshotStoreAdapter` into Dhrey's
+  table, and survives process death because restore reads it. A held row is precisely a row restore
+  will put back. Nothing is recomputed and no new model is introduced — `HeldSetting` is a
+  projection of the frozen `DeviceSnapshot`, asserted as such in a test.
+- **HELD is not `applied`, and the vocabulary must not merge them.** A snapshot proves Ally captured
+  the user's value; it does not prove Ally's own change succeeded, and the two differ for a
+  capability that snapshotted and then failed. So held rows carry the word "Held" and are not
+  rendered through `StatusChip`: manufacturing an `ActionStatus` nobody observed would be the exact
+  fabrication the status vocabulary exists to prevent. A test asserts a held row has no `status`
+  field at all.
+- **An unreadable store is a third statement, not an empty list.** `readable: false` is kept
+  distinct from `settings: []`. Collapsing them would reintroduce the same lie by another route,
+  because "Ally is not holding any of your settings" is the sentence that sends someone away from a
+  phone that is still dimmed. When the store cannot be read the screen says so and still points at
+  End. This is the same rule `unreadableRestore()` follows at the other end of a session (ADR-117).
+- **Impact:** `results` stays in memory and it is still correct to lose it — it is the richer
+  per-action record, and a restart genuinely did not observe those actions. What changes is that
+  losing it no longer reads as "your phone is untouched".

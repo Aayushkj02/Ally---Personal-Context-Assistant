@@ -376,6 +376,62 @@ transport, not of hardware. When the physical kit arrives it connects behind the
 without the session model changing — that readiness is the Phase 6 deliverable, and it is not the
 same thing as having tested one.
 
+#### A recovered session — what Ally is HOLDING (ADR-129)
+
+A process death empties `results`; it does not empty the phone. The session and countdown come back
+from Dhrey's persisted row, so the screen looks alive, and before this was fixed it read
+`0/0 changes applied` / "Nothing yet." over a phone measured at brightness 64 and `zen_mode=1`.
+
+```
+app killed ──► reopen ──► refreshContext()
+                             |  getActiveContext()      session + endsAt   (durable, Dhrey)
+                             |  heldForSession()        device_snapshot    (durable, AAYUSH)
+                             ▼
+                 results.length === 0 && held !== null   ──►  "Ally is holding 2 of your settings"
+                                                              dnd          Held  goes back to off
+                                                              brightness   Held  goes back to 187
+```
+
+The snapshots were always the durable answer — restore reads them, so **a held row is exactly a row
+that will be put back**. Nothing is recomputed and no model is added; `HeldSetting` is a projection
+of the frozen `DeviceSnapshot`.
+
+Three outcomes stay distinct, because collapsing any two restores the bug: snapshots present →
+name them; no snapshots → "not holding any"; store unreadable → `readable: false`, which says so
+and still points at End. "Not holding anything" is the one sentence that sends someone away from a
+phone Ally is still holding, so an unreadable store must never produce it (same rule as
+`unreadableRestore()`, §6).
+
+**Held is not `applied`.** A snapshot proves Ally captured the user's value, not that its own change
+succeeded. Held rows carry no `ActionStatus` and do not render through `StatusChip`.
+
+#### A6.9 — what a future Office Kit has to satisfy
+
+The hardware does not exist yet, so the deliverable is a seam, not a driver. Anything connecting
+later implements `SessionMirrorTransport` — five methods, structurally identical to what
+`sessionSync` already exposes:
+
+| Method | Fired when | Carries |
+|---|---|---|
+| `syncSessionStarted` | a context starts | sessionId, profileId, state, durationMinutes \| null |
+| `syncPlanSubmitted` | immediately after | the `ActionPlan` verbatim |
+| `syncResultsReceived` | start and end | `ActionResult[]` verbatim |
+| `syncStateChanged` | start | the state the coordinator settled on |
+| `syncSessionEnded` | a context ends | the final state |
+
+Rules a future implementation must not break:
+
+- **Forward, never derive.** These are the objects the lifecycle produced. A kit that recomputed
+  state would become a second source of truth the moment the phone changed without it.
+- **`PARTIAL` crosses as `PARTIAL`.** Rounding a shortfall to "running" undoes the vocabulary at
+  the last possible moment.
+- **Failure is invisible to the phone.** A kit that is unplugged, asleep or mid-reboot must not be
+  able to affect a session. Pushes are contained on both sides.
+- **`durationMinutes: null` means open-ended**, not zero and not unknown.
+
+The interface is depended on structurally rather than by importing Dhrey's class, which is what
+lets the real kit arrive behind the same five methods without the session or data model changing.
+
 ---
 
 ## 6. Restoration & override expiry — *Aayush*
