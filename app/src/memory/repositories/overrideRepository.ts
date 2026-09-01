@@ -42,13 +42,27 @@ export const overrideRepository = {
     };
   },
 
-  async getActiveForProfile(profileId: string): Promise<TemporaryOverride[]> {
+  /**
+   * Overrides in force for this profile right now.
+   *
+   * Active means the window is open: started, not yet expired, not deactivated.
+   * The clock is injectable, like sessionRepository.getActive(now) and the policy
+   * resolver, so expiry is testable at an exact instant rather than only "whenever
+   * this ran". Expiry is decided per query — nothing is deleted and no timer runs, so
+   * an app reopened hours later sees the correct answer immediately.
+   */
+  async getActiveForProfile(
+    profileId: string,
+    now: number = Date.now(),
+  ): Promise<TemporaryOverride[]> {
     const db = await getDatabase();
-    const now = Date.now();
     const rows = await db.getAllAsync<any>(
-      `SELECT * FROM temporary_override 
-       WHERE profileId = ? AND active = 1 AND expiresAt > ?`,
-      [profileId, now],
+      `SELECT * FROM temporary_override
+         WHERE profileId = ?
+           AND active = 1
+           AND startAt <= ?
+           AND expiresAt > ?`,
+      [profileId, now, now],
     );
     return rows.map((row) => ({
       ...row,
@@ -57,9 +71,21 @@ export const overrideRepository = {
     }));
   },
 
-  async identifyExpired(): Promise<TemporaryOverride[]> {
+  /** Every override ever recorded for a profile, newest first. History is retained. */
+  async listForProfile(profileId: string): Promise<TemporaryOverride[]> {
     const db = await getDatabase();
-    const now = Date.now();
+    const rows = await db.getAllAsync<any>(
+      `SELECT * FROM temporary_override WHERE profileId = ? ORDER BY startAt DESC, rowid DESC`,
+      [profileId],
+    );
+    return rows.map((row) => ({
+      ...row,
+      value: decodeValue(row.value),
+      active: row.active === 1,
+    }));
+  },
+  async identifyExpired(now: number = Date.now()): Promise<TemporaryOverride[]> {
+    const db = await getDatabase();
     const rows = await db.getAllAsync<any>(
       'SELECT * FROM temporary_override WHERE active = 1 AND expiresAt <= ?',
       [now],

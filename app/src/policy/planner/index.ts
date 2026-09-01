@@ -1,4 +1,5 @@
-import type { Capability, PermissionRequirement } from '../../types/capability';
+import type { Capability, CapabilityValue, PermissionRequirement } from '../../types/capability';
+import type { DeviceSnapshot } from '../../types/models';
 import type { ActionPlan, PlannedAction, ResolvedPolicy } from '../../types/policy';
 import type { Persistence } from '../../types/intent';
 
@@ -34,5 +35,40 @@ export function buildActionPlan(
     sessionId,
     actions,
     restoreOnEnd,
+  };
+}
+
+/**
+ * RestorePlanner: DeviceSnapshot[] -> ActionPlan (D3.3).
+ *
+ * Turns the originals captured before a context into a plan that puts them back. Pure
+ * and deterministic, exactly like buildActionPlan, and it produces the SAME frozen
+ * ActionPlan the executor already consumes — there is no second plan type.
+ *
+ * Two fields differ from a forward plan, and both matter:
+ *   needsSnapshot false  Snapshotting mid-restore would capture the CONTEXT's values
+ *                        as if they were the originals, destroying the real ones.
+ *   restoreOnEnd  false  Putting settings back is not itself a context to undo later.
+ *
+ * A snapshot whose previousValue is null is EXCLUDED rather than defaulted:
+ * PlannedAction.value is CapabilityValue and cannot hold null, and guessing a value
+ * the user never had is worse than leaving the capability alone. Callers see those rows
+ * via RestorationTarget.unavailable.
+ */
+export function buildRestorePlan(sessionId: string, snapshots: DeviceSnapshot[]): ActionPlan {
+  const actions: PlannedAction[] = snapshots
+    .filter((snapshot) => snapshot.previousValue !== null)
+    .map((snapshot) => ({
+      capability: snapshot.capability,
+      value: snapshot.previousValue as CapabilityValue,
+      needsSnapshot: false,
+      requiredPermission: PERMISSION_MAP[snapshot.capability],
+      reason: 'restoring the value from before this context',
+    }));
+
+  return {
+    sessionId,
+    actions,
+    restoreOnEnd: false,
   };
 }

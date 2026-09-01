@@ -15,6 +15,7 @@ app/ios/
 dist/
 build/
 web-build/
+.gradle/
 *.apk
 *.aab
 *.keystore

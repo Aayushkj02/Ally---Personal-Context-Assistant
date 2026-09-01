@@ -24,7 +24,22 @@ export function validatePolicyInput(capability: Capability, value: CapabilityVal
 }
 
 /**
- * Filter out overrides that have already expired.
+ * Is this override in force at `now`?
+ *
+ * The single definition of "active", so policy and the repository cannot drift apart:
+ * started, not yet expired, not deactivated. The upper bound is EXCLUSIVE — an override
+ * expiring exactly at `now` is already over, which keeps "until 18:00" meaning
+ * up-to-but-not-including 18:00 rather than a value that lingers for one more tick.
+ */
+export function isOverrideActive(override: TemporaryOverride, now: number): boolean {
+  return override.active && override.startAt <= now && override.expiresAt > now;
+}
+
+/**
+ * Filter out overrides that are not in force, optionally scoping to one profile.
+ *
+ * Evaluated at resolve time rather than by a background job, so the correct policy is
+ * computed even if the app was killed while an override was live (FLOW.md §4).
  */
 export function getActiveOverrides(
   overrides: TemporaryOverride[],
@@ -33,12 +48,9 @@ export function getActiveOverrides(
 ): TemporaryOverride[] {
   return overrides.filter(
     (override) =>
-      override.active &&
-      override.expiresAt > now &&
-      (profileId === null || override.profileId === profileId),
+      isOverrideActive(override, now) && (profileId === null || override.profileId === profileId),
   );
 }
-
 /**
  * Core precedence logic for a single capability.
  * Returns the highest precedence entry, its source, and a human-readable reason.

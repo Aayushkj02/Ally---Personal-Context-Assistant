@@ -26,3 +26,20 @@ export {
   knownActivities,
 } from './profileContext';
 export type { ProfileContext, LookupOptions } from './profileContext';
+export {
+  getRestoreHistory,
+  listRestoreHistory,
+  listCompletedContexts,
+  listRestorableContexts,
+  getOriginalValue,
+} from './restoreHistory';
+export type { RestoreHistoryEntry } from './restoreHistory';
+export { findReversibleContext, getRestorationTarget, findRestorationTarget } from './reversal';
+export type { RestorationTarget } from './reversal';
+export {
+  createTemporaryOverride,
+  listActiveOverrides,
+  listOverrideHistory,
+  deactivateOverride,
+} from './overrides';
+export type { CreateOverrideInput } from './overrides';

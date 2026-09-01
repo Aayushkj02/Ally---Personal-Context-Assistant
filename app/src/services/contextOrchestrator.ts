@@ -19,10 +19,12 @@
 import { intentEngine, type IntentEngine } from '../ai';
 import { IntentValidator } from '../ai/validators';
 import { commandRepository, loadProfileContext, startSession } from '../memory';
+import { profileRepository, priorityRepository } from '../memory/repositories';
 import { getModeDefinition, type ModeDefinition } from '../modes';
 import { buildActionPlan, resolve, resolvePriority } from '../policy';
 import type { ResolvedPriority } from '../policy';
 import { buildPriorityRequest, type PriorityRequest } from './priorityIntegration';
+import { memoryQueryService, type MemoryQueryResult } from './memoryQueryService';
 import type {
   ActionPlan,
   Capability,
@@ -64,6 +66,17 @@ export type ActivationOutcome =
       plan: ActionPlan;
       /** Resolved from stored priority rows; not applied to the device (D-V6). */
       priority: SlicePriority;
+    }
+  | {
+      kind: 'taught';
+      intent: Intent;
+      profile: ContextProfile;
+    }
+  | {
+      kind: 'memory-query';
+      intent: Intent;
+      profile: ContextProfile;
+      memory: MemoryQueryResult;
     };
 
 export interface ActivationDeps {
@@ -152,6 +165,58 @@ export async function activateFromText(
   }
 
   const { profile } = context;
+
+  // 4.5 Phase 4 Teaching Persistence Routing (D4.2 & D4.3)
+  const isPersistentCorrection =
+    intent.operation === 'teach' || intent.persistence === 'persistent';
+
+  if (isPersistentCorrection) {
+    // Persist Capability Preferences
+    for (const change of intent.requestedChanges) {
+      await profileRepository.createPreference({
+        id: newId('pref', now),
+        profileId: profile.id,
+        capability: change.capability,
+        value: change.value,
+        source: 'user',
+        sourceCommand: intent.rawText,
+        createdAt: now,
+      });
+    }
+
+    // Persist Priority Exceptions
+    for (const exception of intent.exceptions) {
+      if (exception.effect === 'allow') {
+        await priorityRepository.addPreference({
+          profileId: profile.id,
+          channel: exception.channel ?? 'calls',
+          subject: exception.value,
+          subjectKind: exception.type,
+          sourceCommand: intent.rawText,
+          now,
+        });
+      } else if (exception.effect === 'block') {
+        // D4.3: Deterministic removal by natural key
+        const allPrefs = await priorityRepository.listForProfile(profile.id);
+        const target = allPrefs.find(
+          (p) =>
+            p.channel === (exception.channel ?? 'calls') &&
+            p.subject.toLowerCase() === exception.value.toLowerCase()
+        );
+        if (target) {
+          await priorityRepository.removePreference(target.id);
+        }
+      }
+    }
+
+    return { kind: 'taught', intent, profile };
+  }
+
+  // 4.6 Phase 4 Memory Query Routing (D4.4)
+  if (intent.operation === 'query') {
+    const memory = await memoryQueryService.queryProfileMemory(profile.id);
+    return { kind: 'memory-query', intent, profile, memory };
+  }
 
   // 5. Pure resolution. Precedence stays exactly as D2 defined it — memory supplied the
   //    rows, policy decides which one wins.

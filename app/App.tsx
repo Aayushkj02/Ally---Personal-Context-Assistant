@@ -270,10 +270,26 @@ function DeviceHarness({
       await ensureSeeded();
       const outcome = await activateFromText(STUDY_COMMAND);
 
-      if (outcome.kind !== 'activated') {
+      if (outcome.kind === 'clarification') {
         setProbe({
           verdict: 'parser asked for clarification — nothing was applied',
           question: outcome.clarification.question,
+        });
+        return;
+      }
+
+      if (outcome.kind === 'taught') {
+        setProbe({
+          verdict: 'preference saved — nothing was applied',
+          sentence: STUDY_COMMAND,
+        });
+        return;
+      }
+
+      if (outcome.kind === 'memory-query') {
+        setProbe({
+          verdict: `memory queried — ${outcome.memory.capabilities.length} capabilities, ${outcome.memory.priorities.length} priorities`,
+          sentence: STUDY_COMMAND,
         });
         return;
       }
