@@ -36,11 +36,11 @@ function tally(results: ActionResult[]): Record<ActionStatus, number> {
  * says a session starts READY and "the executor moves it to ACTIVE once actions are
  * applied", and endSession() takes PARTIAL. So:
  *
- *   ACTIVE   every action applied — the context is genuinely running
- *   PARTIAL  some applied, some did not. The honest answer for a Study plan today, where
+ *   ACTIVE   every action settled — applied, or skipped because it was already true
+ *   PARTIAL  some settled, some did not. The honest answer for a Study plan today, where
  *            DND and brightness apply and ringer reports not_supported until T5. Rounding
  *            this to "success" or "failure" would be a lie in both directions.
- *   ERROR    nothing applied
+ *   ERROR    nothing settled
  *
  * The executor RETURNS this; it does not write it. Moving the session row is
  * markSessionActive()/endSession() in Dhrey's memory layer, and the action engine does
@@ -55,11 +55,21 @@ export interface PlanSummary {
 export function summarisePlan(results: ActionResult[]): PlanSummary {
   const byStatus = tally(results);
 
-  const applied = byStatus.applied;
+  // `skipped` COUNTS AS SETTLED, not as a shortfall — the same rule summariseRestore already
+  // applies, and for the same reason: it means the requested state is already true, which is a
+  // success in the only terms the user cares about.
+  //
+  // Nothing on the apply path produced `skipped` until Phase 5. The alarm does: a Sleep plan
+  // contains the same alarm action twice (once resolved from the command, once appended from the
+  // schedule), and the second one honestly reports "already sent to your Clock app" rather than
+  // putting a duplicate in the user's Clock. Counting that as a shortfall would have made every
+  // flawless Sleep run report PARTIAL — telling the user something went wrong when the opposite
+  // happened, which is the same class of lie as rounding PARTIAL up to success.
+  const settled = byStatus.applied + byStatus.skipped;
   const state: PlanSummary['state'] =
-    results.length > 0 && applied === results.length
+    results.length > 0 && settled === results.length
       ? 'ACTIVE'
-      : applied === 0
+      : settled === 0
         ? 'ERROR'
         : 'PARTIAL';
 

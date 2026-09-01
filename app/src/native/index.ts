@@ -19,6 +19,10 @@ import {
   setPriorityCallers,
   applyPriorityPreferences,
   analyseCallLog,
+  withAlarmContext,
+  dismissAllyAlarm,
+  showClockAlarms,
+  alarmDebugState,
 } from './AllyNative';
 import { mockRegistry, mockBorrowedPolicy } from './MockDevice';
 
@@ -41,5 +45,10 @@ export {
   setPriorityCallers,
   applyPriorityPreferences,
   analyseCallLog,
+  withAlarmContext,
+  dismissAllyAlarm,
+  showClockAlarms,
+  alarmDebugState,
   mockRegistry,
 };
+export type { AlarmContext } from './capabilities/AlarmCapability';

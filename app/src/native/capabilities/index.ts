@@ -3,8 +3,8 @@
  *
  * Real, native-backed DeviceCapability implementations.
  *
- * STATE: DND (T3) and brightness (T4) are implemented. Ringer and alarm (T5) are still
- * `pendingCapability` — they answer `isAvailable() === false` and return
+ * STATE: DND (T3), brightness (T4) and alarm (A5.1) are implemented. Ringer is still
+ * `pendingCapability` — it answers `isAvailable() === false` and returns
  * `not_supported` from execute/restore.
  *
  * That is deliberate and is the whole point of the architecture: an unimplemented
@@ -27,6 +27,7 @@ import type { AllyNativeSpec } from '../../../modules/ally-native';
 import { describePermission } from '../permissions';
 import { createDndCapability } from './DndCapability';
 import { createBrightnessCapability } from './BrightnessCapability';
+import { createAlarmCapability, type AlarmContext } from './AlarmCapability';
 
 /**
  * A capability whose native implementation has not landed yet.
@@ -69,15 +70,24 @@ export function pendingCapability(
   };
 }
 
-/** Builds the full native capability set. T3/T4/T5 swap entries out of `pendingCapability`. */
+/**
+ * Builds the full native capability set.
+ *
+ * `alarm` takes an optional context because the ActionPlan cannot carry recurrence or a session
+ * scope — see AlarmCapability's `AlarmContext` for why, and `withAlarmContext()` in
+ * src/native/AllyNative.ts for how the app shell supplies them. Without one the alarm is one-shot
+ * and idempotent under a default scope, which is correct for every caller that has no schedule to
+ * pass.
+ */
 export function createNativeCapabilities(
   native: AllyNativeSpec,
+  alarm?: AlarmContext,
 ): Record<Capability, DeviceCapability> {
   return {
     dnd: createDndCapability(native),
     brightness: createBrightnessCapability(native),
     // Ringer is a separate capability from DND and is not part of T3.
     ringer: pendingCapability('ringer', 'notification_policy', native, 'T5'),
-    alarm: pendingCapability('alarm', 'exact_alarm', native, 'T5'),
+    alarm: createAlarmCapability(native, alarm),
   };
 }

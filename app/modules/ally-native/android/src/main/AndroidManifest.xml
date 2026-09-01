@@ -5,14 +5,24 @@
 
     ACCESS_NOTIFICATION_POLICY  DND / Zen  (T3)
     WRITE_SETTINGS              brightness (T4)
-    SCHEDULE_EXACT_ALARM        alarms     (T5)
 
-    All three are user-granted via a settings screen, not a runtime dialog. Declaring them
+    Both are user-granted via a settings screen, not a runtime dialog. Declaring them
     grants nothing on its own - AllyNativeModule.getPermissionStatus() reports the truth.
   -->
   <uses-permission android:name="android.permission.ACCESS_NOTIFICATION_POLICY" />
   <uses-permission android:name="android.permission.WRITE_SETTINGS" />
-  <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
+
+  <!--
+    SET_ALARM backs the wake-up alarm (A5.1). It is a NORMAL permission, granted at install,
+    and it is the one ACTION_SET_ALARM actually requires.
+
+    It replaces SCHEDULE_EXACT_ALARM, which was declared here for the same feature and was the
+    wrong permission for it: SCHEDULE_EXACT_ALARM gates AlarmManager, whose alarms live inside
+    the app and never appear in the Clock. Ally hands the request to the phone's own Clock
+    instead (ADR-127), so keeping the exact-alarm grant would have meant asking the user for
+    something this feature does not use while the permission it does use went undeclared.
+  -->
+  <uses-permission android:name="com.android.alarm.permission.SET_ALARM" />
 
   <!--
     READ_CALL_LOG backs repeated-caller DETECTION only (CallLogAnalyzer). It never changes
@@ -21,4 +31,22 @@
     than guessing. See ADR-109.
   -->
   <uses-permission android:name="android.permission.READ_CALL_LOG" />
+
+  <!--
+    REQUIRED AT targetSdk 30+, and easy to miss. Package visibility hides other apps from
+    resolveActivity() unless the intent is declared here, so without this block
+    AlarmController.isAvailable() returns false on a phone that plainly has a Clock app — and
+    the capability would honestly, and wrongly, report "not supported on this device".
+  -->
+  <queries>
+    <intent>
+      <action android:name="android.intent.action.SET_ALARM" />
+    </intent>
+    <intent>
+      <action android:name="android.intent.action.DISMISS_ALARM" />
+    </intent>
+    <intent>
+      <action android:name="android.intent.action.SHOW_ALARMS" />
+    </intent>
+  </queries>
 </manifest>

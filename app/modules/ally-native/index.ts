@@ -115,6 +115,43 @@ export interface AllyNativeSpec {
   };
 
   // Repeated-caller DETECTION only. Never changes DND, never makes anything ring (ADR-109).
+  // Alarm (A5.1). AlarmClock intents, so the alarm lands in the STOCK Clock app — never
+  // AlarmManager, whose alarms are invisible there (ADR-127).
+  alarmIsAvailable(): boolean;
+  /**
+   * Sends a wake-up alarm to the Clock app.
+   *
+   * `ok` means a real Clock activity resolved AND accepted the intent — NOT that the alarm
+   * exists, which Android exposes no way to check. `skipped` is the honest answer to being asked
+   * for an identical alarm twice in one session, which the Sleep plan currently does.
+   */
+  alarmSet(
+    hour: number,
+    minute: number,
+    weekdays: boolean,
+    sessionId: string,
+  ): {
+    ok: boolean;
+    reason: string | null;
+    message: string;
+    clockPackage: string | null;
+    identity: string | null;
+    skipped: boolean;
+    rung: string;
+  };
+  /** Dismisses only the alarm carrying Ally's label; unrelated alarms cannot be addressed. */
+  alarmDismiss(sessionId: string | null): {
+    ok: boolean;
+    reason: string | null;
+    message: string;
+    clockPackage: string | null;
+    skipped: boolean;
+  };
+  /** Opens the Clock's alarm list. The human read-back, since there is no API one. */
+  alarmShowAlarms(): boolean;
+  alarmForgetSession(sessionId: string): boolean;
+  alarmDebugState(): Record<string, unknown>;
+
   callLogHasPermission(): boolean;
   callLogAnalyse(): Record<string, unknown>;
 }

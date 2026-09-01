@@ -22,6 +22,7 @@ import type {
   RingerMode,
 } from '../types';
 import { PERMISSION_LABELS } from './permissions';
+import type { AlarmContext } from './capabilities/AlarmCapability';
 
 /** Android's SCREEN_BRIGHTNESS range, so the mock loses the same rounding the real device does. */
 const RAW_MAX = 255;
@@ -119,6 +120,38 @@ let livePolicy: MockPolicy = { ...DEFAULT_POLICY };
  */
 let savedPolicy: MockPolicy | null = null;
 
+/**
+ * The phone's Clock app, modelled as a list (A5.1).
+ *
+ * Ally cannot READ this on a real device — AlarmClock exposes SET, DISMISS and SHOW and nothing
+ * else — so the mock deliberately gives tests a view the product does not have. That is the
+ * point: it is how "the user's own alarm was left alone" and "a weekday alarm is not a one-shot"
+ * become assertable at all, and it is why the device test in DEVICE_NOTES remains the acceptance
+ * evidence rather than this.
+ */
+export interface MockAlarm {
+  time: string;
+  weekdays: boolean;
+  label: string;
+}
+
+/** Ally's label, and the only alarm dismissal can address. Mirrors AlarmController.LABEL. */
+const ALLY_ALARM_LABEL = 'Ally wake-up';
+
+/** The user's own alarm, already in the Clock before Ally arrives. Nothing may touch it. */
+const USER_ALARM: MockAlarm = { time: '06:00', weekdays: true, label: 'Work' };
+
+let clock: MockAlarm[] = [{ ...USER_ALARM }];
+let clockAvailable = true;
+let clockRefuses = false;
+
+/**
+ * What Ally last sent per session — SharedPreferences, so it survives __simulateProcessDeath()
+ * exactly as AlarmController's does. Without it the same alarm action arriving twice in one plan
+ * would put two identical alarms in the user's Clock.
+ */
+const alarmSent = new Map<string, string>();
+
 const rawKey = (percent: number): string => `raw_${percent}`;
 /** Mirrors BrightnessController's KEY_BORROWED: set on capture, cleared when it goes back. */
 const BORROWED = 'borrowed';
@@ -166,6 +199,25 @@ export function __resetMockState(): void {
     exact_alarm: true,
   };
   prefs.clear();
+  clock = [{ ...USER_ALARM }];
+  clockAvailable = true;
+  clockRefuses = false;
+  alarmSent.clear();
+}
+
+/** Test hook: every alarm in the phone's Clock, Ally's and the user's alike. */
+export function __getMockAlarms(): MockAlarm[] {
+  return clock.map((a) => ({ ...a }));
+}
+
+/** Test hook: no Clock app handles the intent, as on a stripped ROM. */
+export function __setMockClockAvailable(available: boolean): void {
+  clockAvailable = available;
+}
+
+/** Test hook: a Clock that is there and refuses, which is a different answer from absent. */
+export function __setMockClockRefuses(refuses: boolean): void {
+  clockRefuses = refuses;
 }
 
 /** Test hook: the device's true raw brightness, which the percent contract cannot express. */
@@ -544,44 +596,164 @@ const ringer = makeCapability(
   (v) => `Ringer set to ${v}.`,
 );
 
+const TIME = /^([01]?\d|2[0-3]):([0-5]\d)$/;
+
+/** "07:00|weekdays" — mirrors AlarmController.identity(). Either half differing is a new alarm. */
+const alarmIdentity = (time: string, weekdays: boolean): string =>
+  `${time}|${weekdays ? 'weekdays' : 'once'}`;
+
 /**
- * Alarm is one-shot: it schedules rather than mutating a restorable setting.
- * snapshot() returns null and restore() is a no-op — the action engine must not
- * try to "un-set" an alarm the user asked for.
+ * Alarm: it schedules rather than mutating a restorable setting, so snapshot() is null and
+ * restore() is `skipped` — the action engine must never "un-set" an alarm the user asked for.
+ *
+ * Mirrors AlarmCapability step for step (ADR-007 parity), including the two things the ActionPlan
+ * cannot carry: recurrence comes from the context, never inferred from the value, and the session
+ * scopes idempotency because the Sleep plan contains the same alarm action twice.
  */
-const alarm: DeviceCapability = {
-  async isAvailable() {
-    return true;
-  },
-  async requiredPermissions() {
-    return [permission('exact_alarm')];
-  },
-  async snapshot() {
-    return null;
-  },
-  async execute(value) {
-    if (!state.permissions.exact_alarm) return blocked('alarm', 'exact_alarm', null);
-    state.alarm = String(value);
+export function createMockAlarmCapability(context?: AlarmContext): DeviceCapability {
+  const weekdays = context?.recurrence === 'weekdays';
+  const sessionId = context?.sessionId ?? 'ally_default';
+
+  return {
+    async isAvailable() {
+      return clockAvailable;
+    },
+    async requiredPermissions() {
+      return [permission('exact_alarm')];
+    },
+    async snapshot() {
+      return null;
+    },
+
+    async execute(value) {
+      const match = TIME.exec(String(value));
+      if (!match) {
+        return {
+          capability: 'alarm',
+          status: 'failed',
+          beforeValue: null,
+          afterValue: null,
+          message: `"${String(value)}" is not a time of day.`,
+        };
+      }
+
+      if (!clockAvailable) {
+        return {
+          capability: 'alarm',
+          status: 'not_supported',
+          beforeValue: null,
+          afterValue: null,
+          message: 'This phone has no Clock app that Ally can set an alarm in.',
+        };
+      }
+
+      if (!state.permissions.exact_alarm) return blocked('alarm', 'exact_alarm', null);
+
+      const time = `${match[1]!.padStart(2, '0')}:${match[2]}`;
+      const wanted = alarmIdentity(time, weekdays);
+
+      // Asked for the identical alarm twice in one session. Honest, and not a failure.
+      if (alarmSent.get(sessionId) === wanted) {
+        return {
+          capability: 'alarm',
+          status: 'skipped',
+          beforeValue: null,
+          afterValue: value,
+          message: 'That alarm was already sent to your Clock app.',
+        };
+      }
+
+      if (clockRefuses) {
+        return {
+          capability: 'alarm',
+          status: 'failed',
+          beforeValue: null,
+          afterValue: null,
+          message: 'Your Clock app would not take the alarm.',
+        };
+      }
+
+      clock.push({ time, weekdays, label: ALLY_ALARM_LABEL });
+      alarmSent.set(sessionId, wanted);
+      state.alarm = time;
+
+      return {
+        capability: 'alarm',
+        status: 'applied',
+        beforeValue: null,
+        afterValue: value,
+        // "Sent", never "set": on the real device there is no way to confirm the second.
+        message: `Sent to your Clock app: ${ALLY_ALARM_LABEL} at ${time}${
+          weekdays ? ', weekdays.' : '.'
+        }`,
+      };
+    },
+
+    async restore() {
+      return {
+        capability: 'alarm',
+        status: 'skipped',
+        beforeValue: null,
+        afterValue: null,
+        message: 'Your alarm stays in the Clock app. Ending a context does not cancel it.',
+      };
+    },
+  };
+}
+
+const alarm: DeviceCapability = createMockAlarmCapability();
+
+/**
+ * Dismisses ONLY the alarm carrying Ally's label, mirroring dismissAlarm() (A5.5).
+ *
+ * The filter names the label and nothing else, which is the safety property rather than a
+ * precaution: there is no argument here that could reach the user's own alarms.
+ */
+export function dismissMockAlarm(sessionId: string | null = null): {
+  ok: boolean;
+  reason: string | null;
+  message: string;
+} {
+  if (!clockAvailable) {
     return {
-      capability: 'alarm',
-      status: 'applied',
-      beforeValue: null,
-      afterValue: value,
-      message: `Alarm set for ${value}.`,
+      ok: false,
+      reason: 'unsupported',
+      message: 'This phone has no Clock app that Ally can ask.',
     };
-  },
-  async restore() {
-    return {
-      capability: 'alarm',
-      status: 'skipped',
-      beforeValue: null,
-      afterValue: null,
-      message: 'Alarms are left in place when a context ends.',
-    };
-  },
-};
+  }
+  if (!state.permissions.exact_alarm) {
+    return { ok: false, reason: 'permission', message: 'Ally needs permission to change alarms.' };
+  }
+  if (clockRefuses) {
+    return { ok: false, reason: 'error', message: 'Your Clock app would not dismiss the alarm.' };
+  }
+
+  clock = clock.filter((a) => a.label !== ALLY_ALARM_LABEL);
+  if (sessionId !== null) alarmSent.delete(sessionId);
+
+  return {
+    ok: true,
+    reason: null,
+    message: `Asked your Clock app to dismiss ${ALLY_ALARM_LABEL}.`,
+  };
+}
 
 const registry: Record<Capability, DeviceCapability> = { dnd, brightness, ringer, alarm };
+
+/**
+ * The mock registry with its alarm bound to a context, mirroring `withAlarmContext()` on the real
+ * backend (ADR-127). One entry swapped, everything else delegated — never a second device model.
+ */
+export function withMockAlarmContext(base: DeviceRegistry, context: AlarmContext): DeviceRegistry {
+  const bound = createMockAlarmCapability(context);
+  return {
+    backend: base.backend,
+    get(capability) {
+      return capability === 'alarm' ? bound : base.get(capability);
+    },
+    openSettingsFor: base.openSettingsFor,
+  };
+}
 
 export const mockRegistry: DeviceRegistry = {
   backend: 'mock',
