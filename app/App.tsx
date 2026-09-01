@@ -17,6 +17,10 @@ import { STATUS_PRESENTATION } from './src/types';
 import {
   device,
   borrowedPolicy,
+  withAlarmContext,
+  dismissAllyAlarm,
+  showClockAlarms,
+  alarmDebugState,
   getNativeDeviceInfo,
   runDndProbe,
   applyPriorityPreferences,
@@ -73,6 +77,11 @@ const STUDY_COMMAND = "I'm going to study for two hours.";
  */
 const TAUGHT_BRIGHTNESS = 25;
 const TAUGHT_SENTENCE = `Remember that I prefer ${TAUGHT_BRIGHTNESS}% brightness during study`;
+
+/** A5.3 — the Phase 5 acceptance sentence, verbatim. */
+const SLEEP_COMMAND = "I'm going to sleep. Wake me at 7 AM on weekdays.";
+/** The one-shot half of A5.6: same time, no recurrence, so the two must not look alike. */
+const SLEEP_ONCE_COMMAND = 'Wake me at 7 AM.';
 
 const DND_TESTS: { label: string; value: DndMode }[] = [
   { label: 'Priority', value: 'priority' },
@@ -346,79 +355,100 @@ function DeviceHarness({
    * an Android API itself and never builds a PlannedAction — that is the whole boundary
    * being proven here.
    */
-  const runStudyPlan = useCallback(async () => {
-    setProbe({ verdict: `parsing "${STUDY_COMMAND}" …` });
+  const runCommand = useCallback(
+    async (sentence: string) => {
+      setProbe({ verdict: `parsing "${sentence}" …` });
 
-    try {
-      await ensureSeeded();
-      const outcome = await activateFromText(STUDY_COMMAND);
+      try {
+        await ensureSeeded();
+        const outcome = await activateFromText(sentence);
 
-      if (outcome.kind === 'clarification') {
-        setProbe({
-          verdict: 'parser asked for clarification — nothing was applied',
-          question: outcome.clarification.question,
+        if (outcome.kind === 'clarification') {
+          setProbe({
+            verdict: 'parser asked for clarification — nothing was applied',
+            question: outcome.clarification.question,
+          });
+          return;
+        }
+
+        if (outcome.kind === 'taught') {
+          setProbe({
+            verdict: 'preference saved — nothing was applied',
+            sentence,
+          });
+          return;
+        }
+
+        if (outcome.kind === 'memory-query') {
+          setProbe({
+            verdict: `memory queried — ${outcome.memory.capabilities.length} capabilities, ${outcome.memory.priorities.length} priorities`,
+            sentence,
+          });
+          return;
+        }
+
+        const phases: string[] = [];
+
+        // One call. The execute -> summarise -> mark-active sequence lives in the coordinator now,
+        // not here; the harness supplies a device, a store and the hooks (ADR-118).
+        // A5.3: the shell binds THIS command's recurrence to the alarm capability before handing
+        // the device over. It cannot ride in the ActionPlan — PlannedAction.value is a string, so a
+        // one-shot and a weekday alarm arrive identical (ADR-127). `intent.schedule.kind` is the
+        // user's own words, resolved upstream; nothing here infers it.
+        const schedule = outcome.intent.schedule;
+        const registry =
+          schedule && schedule.kind !== 'none'
+            ? withAlarmContext(device, {
+                recurrence: schedule.kind === 'weekdays' ? 'weekdays' : 'once',
+                sessionId: outcome.plan.sessionId,
+              })
+            : device;
+
+        const { state, results, summary, priority, explained } = await startContext(outcome.plan, {
+          registry,
+          // Durable: Dhrey's device_snapshot table, reached through the SnapshotStore port.
+          snapshots: createRepositorySnapshotStore(),
+          hooks: sessionHooks,
+          // A-V7: who may still reach the user while Study runs. Resolution and the device call
+          // are both Dhrey's applyPriorityForActivity(); the coordinator only decides when.
+          applyPriority: async () => {
+            const o = await applyPriorityForActivity(outcome.intent.activity);
+            return o?.enforcement ?? null;
+          },
+          onProgress: (e) => {
+            if (e.phase !== 'pending') phases.push(`${e.capability}:${e.phase}`);
+          },
         });
-        return;
-      }
 
-      if (outcome.kind === 'taught') {
+        // A-V9: hand the outcome to the shell so the Active Context screen shows the real thing
+        // rather than recomputing it. The shell holds it for display only.
+        onStarted({ state, results, explained, priority });
+
+        setLog(results.slice().reverse());
         setProbe({
-          verdict: 'preference saved — nothing was applied',
-          sentence: STUDY_COMMAND,
+          verdict: `${state} — ${summary.byStatus.applied}/${summary.total} applied`,
+          sentence,
+          schedule: schedule ? `${schedule.kind} ${schedule.time ?? ''}`.trim() : 'none',
+          session: outcome.plan.sessionId,
+          ...Object.fromEntries(
+            results.map((r, i) => [`${i + 1}. ${r.capability}`, `${r.status} — ${r.message}`]),
+          ),
+          order: phases.join('  '),
+          ...Object.fromEntries(
+            (priority ?? []).map((c) => [`priority ${c.channel}`, `${c.status} — ${c.message}`]),
+          ),
         });
-        return;
+        await refresh();
+      } catch (e) {
+        setProbe({ verdict: 'run failed', error: e instanceof Error ? e.message : String(e) });
       }
+    },
+    [refresh, onStarted],
+  );
 
-      if (outcome.kind === 'memory-query') {
-        setProbe({
-          verdict: `memory queried — ${outcome.memory.capabilities.length} capabilities, ${outcome.memory.priorities.length} priorities`,
-          sentence: STUDY_COMMAND,
-        });
-        return;
-      }
-
-      const phases: string[] = [];
-
-      // One call. The execute -> summarise -> mark-active sequence lives in the coordinator now,
-      // not here; the harness supplies a device, a store and the hooks (ADR-118).
-      const { state, results, summary, priority, explained } = await startContext(outcome.plan, {
-        registry: device,
-        // Durable: Dhrey's device_snapshot table, reached through the SnapshotStore port.
-        snapshots: createRepositorySnapshotStore(),
-        hooks: sessionHooks,
-        // A-V7: who may still reach the user while Study runs. Resolution and the device call
-        // are both Dhrey's applyPriorityForActivity(); the coordinator only decides when.
-        applyPriority: async () => {
-          const o = await applyPriorityForActivity(outcome.intent.activity);
-          return o?.enforcement ?? null;
-        },
-        onProgress: (e) => {
-          if (e.phase !== 'pending') phases.push(`${e.capability}:${e.phase}`);
-        },
-      });
-
-      // A-V9: hand the outcome to the shell so the Active Context screen shows the real thing
-      // rather than recomputing it. The shell holds it for display only.
-      onStarted({ state, results, explained, priority });
-
-      setLog(results.slice().reverse());
-      setProbe({
-        verdict: `${state} — ${summary.byStatus.applied}/${summary.total} applied`,
-        sentence: STUDY_COMMAND,
-        session: outcome.plan.sessionId,
-        ...Object.fromEntries(
-          results.map((r, i) => [`${i + 1}. ${r.capability}`, `${r.status} — ${r.message}`]),
-        ),
-        order: phases.join('  '),
-        ...Object.fromEntries(
-          (priority ?? []).map((c) => [`priority ${c.channel}`, `${c.status} — ${c.message}`]),
-        ),
-      });
-      await refresh();
-    } catch (e) {
-      setProbe({ verdict: 'run failed', error: e instanceof Error ? e.message : String(e) });
-    }
-  }, [refresh]);
+  const runStudyPlan = useCallback(() => runCommand(STUDY_COMMAND), [runCommand]);
+  const runSleepPlan = useCallback(() => runCommand(SLEEP_COMMAND), [runCommand]);
+  const runSleepOncePlan = useCallback(() => runCommand(SLEEP_ONCE_COMMAND), [runCommand]);
 
   /**
    * A-V2: end the context and put the phone back.
@@ -534,6 +564,35 @@ function DeviceHarness({
         End context reads the session from the database, so it still works after the app has been
         force-stopped and reopened. That is the A-V2 proof.
       </Text>
+
+      <View style={styles.divider} />
+      <Text style={styles.section}>Sleep &amp; wake-up alarm (Phase 5)</Text>
+      <Text style={styles.info}>
+        The alarm goes to your phone&apos;s OWN Clock app through AlarmClock intents, so Android
+        owns it — not Ally. There is no public API to read the Clock back, so &quot;Applied&quot;
+        here means a real Clock activity accepted the request; open the Clock to see the alarm
+        itself. Recurrence comes from the sentence, never invented.
+      </Text>
+      <Pressable style={[styles.btn, styles.btnProbe]} onPress={() => void runSleepPlan()}>
+        <Text style={styles.btnText}>Sleep + 7 AM WEEKDAY alarm</Text>
+      </Pressable>
+      <Pressable style={[styles.btn, styles.btnProbe]} onPress={() => void runSleepOncePlan()}>
+        <Text style={styles.btnText}>Sleep + 7 AM ONE-SHOT alarm</Text>
+      </Pressable>
+      <View style={styles.row}>
+        <Pressable style={styles.btn} onPress={() => showClockAlarms()}>
+          <Text style={styles.btnText}>Open stock Clock</Text>
+        </Pressable>
+        <Pressable
+          style={styles.btn}
+          onPress={() => setProbe({ verdict: 'dismiss', ...(dismissAllyAlarm(null) ?? {}) })}
+        >
+          <Text style={styles.btnText}>Dismiss Ally&apos;s alarm</Text>
+        </Pressable>
+        <Pressable style={styles.btn} onPress={() => setProbe(alarmDebugState())}>
+          <Text style={styles.btnText}>Alarm state</Text>
+        </Pressable>
+      </View>
 
       <View style={styles.divider} />
       <Text style={styles.section}>Learned preference (Phase 4)</Text>
