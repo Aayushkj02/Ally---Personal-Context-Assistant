@@ -1021,3 +1021,119 @@ changed that would prevent it. Dhrey's file.
 Taps do not land reliably for a second or two after a scroll, and immediately after a force-stop the
 JS bundle is still loading. Several "the button did nothing" moments here were one of those two.
 Force-stop, wait for the app to draw, then tap the button at its resting position.
+
+---
+
+## Phase 6 — the demo path on the phone (2026-09-01, SM-S928B, Android 16 / API 36)
+
+> **Physical Office Kit validation is deferred until the team qualifies for the Pune round and
+> receives the Office Kit. Until then, development and real-device testing use the Samsung
+> Galaxy S24 Ultra.**
+
+Nothing below involved Office Kit hardware. The team does not have it. Everything here is Samsung
+evidence, and the laptop mirror is software preparation with nothing on the far end.
+
+Build verified `arm64-v8a`, installed 15:51, no emulator attached.
+
+### Home replaces the harness as the entry point
+
+Opening the app now shows the product, not the scaffolding:
+
+```text
+Ally
+samsung SM-S928B · Android 16 · targetSdk 36
+device backend: native          <- green; a mock would say so in amber
+
+Nothing running
+Your phone is in its own state. Nothing of yours is being held by Ally.
+[ Study for two hours ]
+[ Sleep, wake me at 7 on weekdays ]
+```
+
+The Phase 2 harness is behind a `Developer tools` button at the bottom. It was demoted rather than
+deleted: the DND probe, the alarm diagnostics and the raw-policy dump are still the fastest way to
+work out why a phone is misbehaving.
+
+### A6.2 — the target presentation, on a real phone
+
+Tapping **Study for two hours** ran the real sentence and landed on:
+
+```text
+study    Active    119:43 left
+2/3 changes applied · session active
+
+dnd          Applied                        off → priority       from system defaults
+brightness   Applied                        73 → 25              from your active profile
+ringer       Not supported on this device   null → null          from system defaults
+
+calls        Active on your phone
+sms          Active on your phone
+whatsapp     Remembered, not enforced
+```
+
+Three things worth noting in that one screen:
+
+- **`ringer` is grey, not red.** "Not supported on this device" is a fact about the phone, not a
+  failure. Colour is never the only signal — every status carries words.
+- **brightness went to 25%, not 40%.** The Phase 4 taught preference is still in the database and
+  still driving the device, and the row says *from your active profile* while the others say
+  *from system defaults*.
+- The chips are the design system's `StatusChip`, which takes `ActionStatus` and renders through
+  the frozen `STATUS_PRESENTATION`. `StatusRow` is deliberately not used anywhere — see below.
+
+Device readings across the run:
+
+| Stage | brightness | zen | Ally's zen rule |
+|---|---|---|---|
+| Baseline | 187 | 0 | STATE_FALSE |
+| Study active | 64 (25%) | 1 | STATE_TRUE |
+| After force-stop (pid 7085 → 8352) | 64 | 1 | STATE_TRUE |
+| **After End** | **187** | **0** | **STATE_FALSE** |
+
+Policy back to `ALARMS, MEDIA`. `device_snapshot` empty, session IDLE, and the taught preference and
+the two priority contacts still in the database — memories are not collateral.
+
+### Process death, on the new Home screen
+
+After a force-stop and reopen, Home showed the running context from the database alone:
+
+```text
+📚 Study    Active
+1h 57m remaining
+Ally is holding some of your settings. They go back when this ends.
+```
+
+That is the A6.2 target text, rendered from `getActiveContext()` and the persisted `endsAt` on a
+process with no memory of having started anything.
+
+Opening Active Context on that same fresh process honestly reported **`0/0 changes applied` /
+"Nothing yet."** — the per-action results live in memory and the process restarted. The countdown
+still worked because it comes from the database. That is the correct behaviour, not a bug, and it is
+the same honesty the Phase 2 notes recorded.
+
+### A6.5 — the laptop mirror is SOFTWARE ONLY
+
+`sessionSync` (Dhrey, D-V10) was a complete transport with **zero callers anywhere in the app**. It
+is now driven from `startContext` / `endContext`. That is session-sync plumbing and nothing more:
+
+- No Office Kit hardware was connected, because there is none.
+- The recording transport in the tests is a mock of a **transport**, not of a device.
+- A green `sessionMirror.test.ts` proves message shape, ordering and containment. It proves nothing
+  about physical hardware and must never be cited as if it did.
+
+### An interface mismatch, reported rather than edited
+
+`StatusRow` (Dhrey's, Phase 6 UI foundation) has five states:
+`pending | success | failed | idle | unsupported`. `ACTION_STATUSES` has six. Mapping an
+`ActionResult` through it would silently collapse `permission_needed`, `skipped` and `restored`.
+
+The screens use `StatusChip` instead, and a test fails if `StatusRow` is ever imported into one.
+His component is untouched — this is a note for whoever owns it, not a change made on his behalf.
+
+### Small things worth knowing before the demo
+
+- Taps still do not land reliably for a second or two after a scroll, and immediately after a
+  force-stop the JS bundle is still loading. Wait for the screen to settle, then tap.
+- Auto-rotate was disabled on this phone during Phase 5 testing and has been **restored** to on.
+- The Priority screen's back button used to read "Back to device harness"; it now reads "Back",
+  since the harness is no longer where back goes.

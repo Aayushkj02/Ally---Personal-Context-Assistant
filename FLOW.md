@@ -330,6 +330,54 @@ reports "accepted", not "dismissed".
 
 ---
 
+### 5.3 The live session surface and the laptop mirror — *Aayush, Phase 6*
+
+> **Physical Office Kit validation is deferred until the team qualifies for the Pune round and
+> receives the Office Kit. Until then, development and real-device testing use the Samsung
+> Galaxy S24 Ultra.**
+
+```
+Home  ──"Study for two hours"──►  shell.runSentence()
+                                       |  activateFromText()          (Shlok + Dhrey)
+                                       |  withAlarmContext()          (ADR-127)
+                                       |  startContext()              (AAYUSH)
+                                       |     └─► ActionExecutor ─► device
+                                       |
+                                       ├─► ActiveContext screen       what changed, and why
+                                       └─► mirrorContextStart()  ─►  sessionSync  ─►  laptop
+                                                                      (SOFTWARE ONLY)
+```
+
+**Home is the way in.** The Phase 2 harness is behind a `devtools` route: still the fastest way to
+diagnose a phone, no longer the first thing anyone sees. Both screens are presentational — every
+value arrives as a prop, and a test fails if either imports a native capability, the registry, or
+the memory or policy layers. Starting a context is a callback to the shell, so no screen can reach
+Android directly.
+
+**The mirror is driven from the lifecycle, and forwards rather than derives** (ADR-128).
+`sessionSync` (D-V10) was a complete transport with zero callers; the events it wants all happen
+inside `startContext` / `endContext`. `mirrorContextStart` pushes session → plan → results → state
+in the order the phone lived them; `mirrorContextEnd` pushes what was restored before it pushes the
+ending. Values are handed over by identity, so there is no second source of truth, and `PARTIAL`
+crosses as `PARTIAL` in both directions.
+
+**A mirror never affects what it mirrors.** Every push is contained on top of a transport that
+already swallows. A transport rejecting on all five methods still lets the context end and restore
+exactly.
+
+**Status survives the design system.** Action rows render through `StatusChip`, which takes
+`ActionStatus` and uses the frozen `STATUS_PRESENTATION`. `StatusRow` is deliberately unused: its
+five states cannot express `permission_needed`, `skipped` or `restored`, and collapsing three of six
+is the rounding §5 exists to prevent. Priority keeps its own four-state vocabulary alongside.
+
+**What this flow does NOT include.** There is no Office Kit driver, no hardware handshake and no
+device on the far end of `sessionSync`. The recording transport used in tests is a mock of a
+transport, not of hardware. When the physical kit arrives it connects behind the same five methods
+without the session model changing — that readiness is the Phase 6 deliverable, and it is not the
+same thing as having tested one.
+
+---
+
 ## 6. Restoration & override expiry — *Aayush*
 
 ✅ *Phase 2 — A-V2 landed: `restoreSession()` puts the device back, exactly, across process

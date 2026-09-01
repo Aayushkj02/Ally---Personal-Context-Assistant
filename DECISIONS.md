@@ -1060,3 +1060,50 @@ Because entries never move and IDs never collide, a merge conflict here is alway
   The idempotency record is still cleared on dismissal, deliberately: keeping it would mean a user
   who asks again gets `skipped` and no alarm at all, and a duplicate is noise where a missing
   wake-up is a missed morning.
+
+### ADR-128 — Office Kit is prepared in software; the mirror is driven from the lifecycle
+- **Date:** 2026-09-01 · **Author:** Aayush · **Phase:** 6 · **Status:** Accepted
+- **Decision:** `src/actions/sessionMirror.ts` drives Dhrey's existing `sessionSync` client from
+  `startContext()` / `endContext()`, forwarding the objects those calls already return. Home
+  replaces the Phase 2 harness as the entry point; the harness moves behind a `devtools` route
+  rather than being deleted. `StatusChip` is used for action rows and `StatusRow` deliberately is
+  not. Every test of the mirror is labelled SOFTWARE / SESSION-SYNC VALIDATION.
+- **THE PHYSICAL OFFICE KIT DOES NOT EXIST YET.** The team receives it only on qualifying for the
+  Pune round. Until then the Samsung Galaxy S24 Ultra is the real-device evidence and the Office
+  Kit is a software interface with nothing on the other end. "Office Kit software preparation" and
+  "physical Office Kit testing" are different claims, and nothing in this phase may be reported as
+  the second.
+- **Reason:** `sessionSync` was a complete transport — wire format, validation, connection state,
+  fire-and-forget failure handling — with ZERO callers anywhere in the app. It had been built and
+  never connected. Every event it wants (a context started, a plan submitted, results returned, a
+  session ended) happens inside the coordinator, which is this layer, so the missing half was
+  always on the Aayush side. Forwarding rather than recomputing is what keeps this from becoming a
+  second source of truth: a test asserts the mirror hands over the very objects the lifecycle
+  produced, by identity rather than equality, and that PARTIAL survives the trip in both
+  directions. A mirror that rounded a shortfall to "running" would undo the status vocabulary at
+  the last possible moment.
+- **A mirror must never affect the thing it mirrors.** Every push is contained on top of a
+  transport that already swallows. A transport that rejects on all five methods still lets the
+  context end and restore exactly — asserted, not assumed.
+- **StatusRow is an interface mismatch, reported rather than edited.** Dhrey's component has five
+  states: `pending | success | failed | idle | unsupported`. `ACTION_STATUSES` has six. Mapping an
+  `ActionResult` through it would silently collapse `permission_needed`, `skipped` and `restored` —
+  three of six — which is precisely the rounding `executionStatus.test.ts` exists to prevent. So
+  the screens use `StatusChip`, which takes `ActionStatus` and renders through the frozen
+  `STATUS_PRESENTATION`. His file is untouched, and a test fails if `StatusRow` is ever imported
+  into a screen.
+- **The harness is demoted, not deleted.** A6.6 asks for the temporary harness to stop being the
+  demo path, and it has: Home is the entry point and a test asserts the router falls through to it.
+  Deleting the harness outright would also delete the DND probe, the alarm diagnostics and the
+  raw-policy dump, which are still the fastest way to work out why a phone is misbehaving. It sits
+  behind `devtools` with a way back.
+- **Alternatives considered:** Put the mirror in `src/services/` — that directory belongs to Shlok
+  and Dhrey, and the lifecycle it observes does not live there. Extend `LifecycleHooks` to carry
+  the plan and results — the hooks exist to let a caller connect Dhrey's session functions without
+  this layer importing them, and widening them to carry payloads would make every future hook
+  implementer handle data they do not want. Build an Office Kit device driver now — there is no
+  device; it would be fiction with a green test beside it.
+- **Impact:** the recording transport in `sessionMirror.ts` is a mock of a TRANSPORT, not of
+  hardware, and says so where a reader of a green run would see it. When the physical kit arrives
+  it connects behind the same five methods with no change to the session model — which is the
+  actual deliverable of A6.9, and is not the same as having tested one.

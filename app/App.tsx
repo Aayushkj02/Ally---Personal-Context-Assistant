@@ -239,7 +239,7 @@ export default function App() {
           }}
         />
         <Pressable style={styles.backBtn} onPress={home}>
-          <Text style={styles.btnText}>Back to device harness</Text>
+          <Text style={styles.btnText}>Back</Text>
         </Pressable>
       </View>
     );
