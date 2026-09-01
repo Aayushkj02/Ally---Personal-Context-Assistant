@@ -1,7 +1,7 @@
 import type { Capability, CapabilityValue, PermissionRequirement } from '../../types/capability';
 import type { DeviceSnapshot } from '../../types/models';
 import type { ActionPlan, PlannedAction, ResolvedPolicy } from '../../types/policy';
-import type { Persistence } from '../../types/intent';
+import type { Persistence, IntentSchedule } from '../../types/intent';
 
 const PERMISSION_MAP: Record<Capability, PermissionRequirement['key'] | null> = {
   dnd: 'notification_policy',
@@ -18,6 +18,7 @@ export function buildActionPlan(
   sessionId: string,
   policy: ResolvedPolicy,
   persistence: Persistence,
+  schedule?: IntentSchedule | null,
 ): ActionPlan {
   // We need to restore state if this is not a permanent change
   const restoreOnEnd =
@@ -30,6 +31,16 @@ export function buildActionPlan(
     requiredPermission: PERMISSION_MAP[entry.capability],
     reason: entry.reason,
   }));
+
+  if (schedule && schedule.kind !== 'none' && schedule.time) {
+    actions.push({
+      capability: 'alarm',
+      value: schedule.time,
+      needsSnapshot: false,
+      requiredPermission: 'exact_alarm',
+      reason: 'from your command',
+    });
+  }
 
   return {
     sessionId,
