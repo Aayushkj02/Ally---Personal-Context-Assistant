@@ -1,6 +1,5 @@
 package com.ally.nativemodule
 
-import android.app.AlarmManager
 import android.app.NotificationManager
 import android.content.Context
 import android.content.Intent
@@ -63,14 +62,11 @@ class AllyNativeModule : Module() {
 
         "write_settings" -> Settings.System.canWrite(context)
 
-        "exact_alarm" -> {
-          if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            val am = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
-            am.canScheduleExactAlarms()
-          } else {
-            true
-          }
-        }
+        // The permission that ACTUALLY gates what Ally does (ADR-127). This used to report
+        // canScheduleExactAlarms(), which belongs to AlarmManager — an API we deliberately do not
+        // use, because its alarms never reach the Clock app. Reporting it here meant the UI could
+        // send the user to grant something irrelevant while the real permission stayed unchecked.
+        "exact_alarm" -> AlarmController.hasPermission(context)
 
         // Microphone is a runtime permission handled on the JS side by expo, not here.
         else -> false
@@ -86,12 +82,10 @@ class AllyNativeModule : Module() {
         "write_settings" ->
           Intent(Settings.ACTION_MANAGE_WRITE_SETTINGS, Uri.parse("package:${context.packageName}"))
 
-        "exact_alarm" ->
-          if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM, Uri.parse("package:${context.packageName}"))
-          } else {
-            appDetailsIntent()
-          }
+        // SET_ALARM is a normal, install-time permission: there is no settings screen that grants
+        // it, so the app details page is the honest destination rather than the exact-alarm screen,
+        // which would toggle something that has no effect on this capability.
+        "exact_alarm" -> appDetailsIntent()
 
         else -> appDetailsIntent()
       }
@@ -157,6 +151,33 @@ class AllyNativeModule : Module() {
     Function("brightnessRestore") { percent: Int -> BrightnessController.restore(context, percent) }
 
     // ---- Repeated-caller DETECTION (T4). Never rings anything — see CallLogAnalyzer. ----
+
+    // ---- Alarm (A5.1) — AlarmClock intents, so the alarm lands in the STOCK Clock app ----
+
+    Function("alarmIsAvailable") { AlarmController.isAvailable(context) }
+
+    /**
+     * Sends a wake-up alarm to the Clock app. `weekdays` comes from the user's own words,
+     * resolved upstream — nothing here infers recurrence. `sessionId` scopes idempotency.
+     */
+    Function("alarmSet") { hour: Int, minute: Int, weekdays: Boolean, sessionId: String ->
+      AlarmController.set(context, hour, minute, weekdays, sessionId)
+    }
+
+    /** Dismisses ONLY the alarm carrying Ally's label. Unrelated alarms cannot be named. */
+    Function("alarmDismiss") { sessionId: String? ->
+      AlarmController.dismiss(context, sessionId)
+    }
+
+    /** Opens the Clock's own alarm list — how a human verifies what no API will report. */
+    Function("alarmShowAlarms") { AlarmController.showAlarms(context) }
+
+    Function("alarmForgetSession") { sessionId: String ->
+      AlarmController.forgetSession(context, sessionId)
+      true
+    }
+
+    Function("alarmDebugState") { AlarmController.debugState(context) }
 
     Function("callLogHasPermission") { CallLogAnalyzer.hasPermission(context) }
     Function("callLogAnalyse") { CallLogAnalyzer.analyse(context) }

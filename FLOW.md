@@ -282,6 +282,52 @@ The second row is a live trap: re-activating starts a *second* session, `getActi
 returns the new one, and the genuine original is stranded on a first session nothing will ever end.
 Both rows are pinned by tests in `src/actions/__tests__/learnedPreferences.test.ts`.
 
+### 5.2 Sleep and the wake-up alarm — *Aayush, Phase 5*
+
+```
+"I'm going to sleep. Wake me at 7 AM on weekdays."
+      |  Shlok    intent.schedule = { kind: 'weekdays', time: '07:00' }
+      |  Dhrey    resolve() -> entry(alarm, '07:00', source: command)
+      |  Dhrey    alarmRepository.createAlarmMetadata({ time, recurrence })
+      |  Dhrey    buildActionPlan() -> [dnd, brightness, alarm 07:00, alarm 07:00]
+      |  ----------------- contract boundary 2 -----------------
+      |  AAYUSH   withAlarmContext(device, { recurrence, sessionId })
+      |           startContext() -> ActionExecutor -> AlarmCapability
+      |           ACTION_SET_ALARM  (EXTRA_HOUR/MINUTES/MESSAGE/SKIP_UI[/DAYS])
+      |  Android  com.sec.android.app.clockpackage
+                  -> the alarm exists in the STOCK Clock
+```
+
+**AlarmClock, not AlarmManager** (ADR-127). An `AlarmManager` alarm belongs to Ally: invisible in
+the Clock, gone with the app's data, uneditable by the user. Phase 5 asks for a real alarm, so
+Android owns it the moment the intent is sent. The permission follows — `SET_ALARM`, not
+`SCHEDULE_EXACT_ALARM`.
+
+**`applied` is narrowed, out loud.** There is no public read-back for Clock alarms, so `applied`
+means a real Clock activity resolved and accepted the intent — nothing more — and the message says
+"Sent to your Clock app". The acceptance evidence is a human opening the Clock.
+
+**Two things the plan cannot carry, supplied by the shell.** `PlannedAction.value` is a string, so
+"Wake me at 7 AM." and "Wake me at 7 AM on weekdays." produce byte-identical actions. The shell
+already holds `intent.schedule.kind` and `plan.sessionId`, so it binds both to the capability and
+hands the registry in (ADR-115). Recurrence is never inferred: no context means one-shot, and
+`EXTRA_DAYS` is not sent at all.
+
+**The plan asks for the alarm twice.** Shlok puts it in `requestedChanges` (so it resolves as a
+`command` entry) and `buildActionPlan` appends a second from `schedule`. The second identical
+request reports `skipped` and sends nothing, so one sentence produces one alarm. `summarisePlan()`
+counts `skipped` as settled for this reason — otherwise a flawless Sleep run would report PARTIAL.
+
+**The alarm is NOT part of restoration** (section 6). `snapshot()` is null and `restore()` is
+`skipped`: Sleep ends when the user wakes up, and deleting their 7am alarm at that moment would
+take tomorrow's with it. Restoration returns what Ally borrowed, and Ally never borrowed the alarm.
+
+**Cancellation is BLOCKED upstream and LIMITED downstream.** No ActionPlan can express it —
+"Cancel the wake-up alarm." yields `operation: modify`, `schedule.kind: none`, and a plan with no
+alarm action — so the native dismissal exists as a standalone function waiting to be wired. And on
+the SM-S928B `ACTION_DISMISS_ALARM` does not remove a scheduled alarm at all (ADR-127), so it
+reports "accepted", not "dismissed".
+
 ---
 
 ## 6. Restoration & override expiry — *Aayush*

@@ -16,6 +16,11 @@ import type {
 import type { BorrowedPolicy } from '../actions/executors';
 import AllyNative, { type AllyNativeDeviceInfo } from '../../modules/ally-native';
 import { createNativeCapabilities } from './capabilities';
+import {
+  createAlarmCapability,
+  dismissAlarm,
+  type AlarmContext,
+} from './capabilities/AlarmCapability';
 
 export function createNativeRegistry(): DeviceRegistry | null {
   if (!AllyNative) return null;
@@ -32,6 +37,52 @@ export function createNativeRegistry(): DeviceRegistry | null {
       native.openSettingsFor(key);
     },
   };
+}
+
+/**
+ * The same registry, with the alarm capability bound to THIS context's recurrence and session
+ * (ADR-127).
+ *
+ * The ActionPlan cannot carry either: `PlannedAction.value` is a string, so a one-shot and a
+ * weekday alarm arrive identical, and nothing in it scopes idempotency. Both facts are already in
+ * the app shell's hands — `intent.schedule.kind` and `plan.sessionId` — so the shell composes the
+ * device and passes it to `startContext`, which is the rule the executor already lives by: it is
+ * handed a device, it never reaches for one (ADR-115).
+ *
+ * Everything except `alarm` is delegated to the base registry unchanged, so this cannot become a
+ * second device model — there is one registry, with one entry swapped.
+ */
+export function withAlarmContext(base: DeviceRegistry, context: AlarmContext): DeviceRegistry {
+  if (!AllyNative) return base;
+
+  const alarm = createAlarmCapability(AllyNative, context);
+  return {
+    backend: base.backend,
+    get(capability) {
+      return capability === 'alarm' ? alarm : base.get(capability);
+    },
+    openSettingsFor: base.openSettingsFor,
+  };
+}
+
+/**
+ * Asks the Clock to dismiss Ally's own alarm (A5.5). Null on the mock backend.
+ *
+ * Standalone rather than a capability method, because cancelling is neither an `execute` nor a
+ * `restore`, and because no ActionPlan can currently express it — see AlarmCapability.
+ */
+export function dismissAllyAlarm(sessionId: string | null = null) {
+  return AllyNative ? dismissAlarm(AllyNative, sessionId) : null;
+}
+
+/** Opens the Clock's own alarm list. The human read-back, since Android offers no API one. */
+export function showClockAlarms(): boolean {
+  return AllyNative ? AllyNative.alarmShowAlarms() : false;
+}
+
+/** Diagnostics: which Clock handles our intents, and what Ally currently remembers sending. */
+export function alarmDebugState(): Record<string, unknown> | null {
+  return AllyNative ? AllyNative.alarmDebugState() : null;
 }
 
 /**

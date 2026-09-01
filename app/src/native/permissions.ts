@@ -29,10 +29,18 @@ export const PERMISSION_LABELS: Record<
     label: 'Microphone',
     rationale: 'Lets you tell Ally what you are doing instead of typing it.',
   },
+  /**
+   * KEY IS FROZEN, MEANING IS NOT. `exact_alarm` is the name in the frozen permission union, but
+   * what it now reports is `com.android.alarm.permission.SET_ALARM` — the permission
+   * ACTION_SET_ALARM actually needs (ADR-127). It used to report SCHEDULE_EXACT_ALARM, which
+   * belongs to AlarmManager, an API Ally deliberately does not use because its alarms never reach
+   * the Clock app. The label no longer names Android's "Alarms & reminders" screen, because
+   * sending the user there would have toggled something with no effect on this capability.
+   */
   exact_alarm: {
     key: 'exact_alarm',
-    label: 'Alarms & reminders',
-    rationale: 'Lets Ally set the wake alarm you ask for.',
+    label: 'Set alarms in your Clock app',
+    rationale: "Lets Ally put the wake-up alarm you asked for into your phone's own Clock.",
   },
 };
 
