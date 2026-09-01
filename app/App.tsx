@@ -126,6 +126,35 @@ function channelRows(r: {
 }
 
 /**
+ * Session-start priority, wired to the SAME native applier the Priority screen already uses.
+ *
+ * WHY THE APPLIER IS PASSED IN RATHER THAN LEFT TO DEFAULT. `applyPriorityForActivity` resolves
+ * its own applier through `defaultApplier()`, which does `await import('../native')` inside a bare
+ * `catch`. On the real S24 Ultra dev build that dynamic import does not hand back the module, the
+ * catch swallows it, and the module falls through to `noDeviceReport` - the answer reserved for
+ * "there is no native module here".
+ *
+ * MEASURED, because this looked like a device limitation and was not one. Active Context reported
+ * calls and sms as "Not supported on this device" while, seconds later on the same phone, the
+ * Priority screen's Apply enforced both and Android's own `mConsolidatedPolicy` showed
+ * PRIORITY_CATEGORY_CALLS + PRIORITY_CATEGORY_MESSAGES with priorityCallSenders=STARRED. Two code
+ * paths, one device, opposite answers - so the report was wrong, not the phone.
+ *
+ * `deps.applier` is the seam Dhrey's module already exposes for exactly this, so nothing in
+ * priorityIntegration.ts changes. This file already imports `applyPriorityPreferences` statically
+ * for the Priority screen, so after this both paths reach ONE implementation instead of two.
+ *
+ * EXISTING FAILURE HANDLING IS DELIBERATELY UNTOUCHED. `applyPriorityPreferences` still returns
+ * null when there is no native module (MockDevice, Expo Go, a Node process), which still produces
+ * `noDeviceReport`; a throwing native call still produces `attemptFailedReport`. This lets an
+ * available device report the truth. It does not let an unavailable one claim success.
+ */
+async function applyPriorityAtStart(activity: string): Promise<ChannelEnforcement[] | null> {
+  const outcome = await applyPriorityForActivity(activity, { applier: applyPriorityPreferences });
+  return outcome?.enforcement ?? null;
+}
+
+/**
  * A-V9. The app shell: a route, a live view of whatever context is running, and the harness.
  *
  * The active context is read from the DATABASE on every visit, never from React state, so the
@@ -262,10 +291,7 @@ export default function App() {
           registry,
           snapshots: createRepositorySnapshotStore(),
           hooks: sessionHooks,
-          applyPriority: async () => {
-            const o = await applyPriorityForActivity(outcome.intent.activity);
-            return o?.enforcement ?? null;
-          },
+          applyPriority: () => applyPriorityAtStart(outcome.intent.activity),
         });
 
         setState(started.state);
@@ -586,12 +612,10 @@ function DeviceHarness({
           // Durable: Dhrey's device_snapshot table, reached through the SnapshotStore port.
           snapshots: createRepositorySnapshotStore(),
           hooks: sessionHooks,
-          // A-V7: who may still reach the user while Study runs. Resolution and the device call
-          // are both Dhrey's applyPriorityForActivity(); the coordinator only decides when.
-          applyPriority: async () => {
-            const o = await applyPriorityForActivity(outcome.intent.activity);
-            return o?.enforcement ?? null;
-          },
+          // A-V7: who may still reach the user while Study runs. Resolution is still Dhrey's
+          // applyPriorityForActivity(); the device call is the native applier this file hands it
+          // (see applyPriorityAtStart). The coordinator only decides when.
+          applyPriority: () => applyPriorityAtStart(outcome.intent.activity),
           onProgress: (e) => {
             if (e.phase !== 'pending') phases.push(`${e.capability}:${e.phase}`);
           },
