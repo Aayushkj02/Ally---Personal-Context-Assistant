@@ -64,7 +64,7 @@ describe('D7.3 Context Crash / Restart Recovery', () => {
     // 0. Insert profile
     await db.runAsync(
       'INSERT OR IGNORE INTO context_profile (id, name, modeKey, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?)',
-      ['prof_test', 'Test Profile', 'study', Date.now(), Date.now()]
+      ['prof_test', 'Test Profile', 'study', Date.now(), Date.now()],
     );
 
     const sessionId = 'session_crash_123';
@@ -77,8 +77,20 @@ describe('D7.3 Context Crash / Restart Recovery', () => {
     };
     await sessionRepository.create(activeSession);
 
-    await snapshots.save({ id: 'snap_1', sessionId, capability: 'brightness', previousValue: 40, capturedAt: Date.now() });
-    await snapshots.save({ id: 'snap_2', sessionId, capability: 'dnd', previousValue: 'off', capturedAt: Date.now() });
+    await snapshots.save({
+      id: 'snap_1',
+      sessionId,
+      capability: 'brightness',
+      previousValue: 40,
+      capturedAt: Date.now(),
+    });
+    await snapshots.save({
+      id: 'snap_2',
+      sessionId,
+      capability: 'dnd',
+      previousValue: 'off',
+      capturedAt: Date.now(),
+    });
 
     const recoveredSession = await sessionRepository.getActive();
     expect(recoveredSession).not.toBeNull();
@@ -104,7 +116,7 @@ describe('D7.3 Context Crash / Restart Recovery', () => {
     // 0. Insert profile
     await db.runAsync(
       'INSERT OR IGNORE INTO context_profile (id, name, modeKey, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?)',
-      ['prof_test', 'Test Profile', 'study', Date.now(), Date.now()]
+      ['prof_test', 'Test Profile', 'study', Date.now(), Date.now()],
     );
 
     const sessionId = 'session_no_snap';

@@ -6,9 +6,9 @@ Baseline: `dev` @ `d5ea2ee` (Phase 0). Task IDs are the existing ones from the p
 
 | Developer | Primary area | Owned directories |
 |---|---|---|
-| **Aayush** | Android, RN app, device capabilities, native modules, action execution, app orchestration | `app/modules/` · `app/src/native/` · `app/src/actions/` · `app/src/navigation/` · `app/src/screens/{Home,ActiveContext,Permissions}/` · `app/app.json` · `app/eas.json` · `app/package.json` · `app/tsconfig.json` |
+| **Aayush** | Android, RN app, device capabilities, native modules, action execution, app orchestration | `app/modules/` · `app/src/native/` · `app/src/actions/` (except crashRecovery) · `app/src/navigation/` · `app/src/screens/{Home,ActiveContext,Permissions}/` · `app/app.json` · `app/eas.json` · `app/package.json` · `app/tsconfig.json` |
 | **Shlok** | AI, intent parsing, fallback parser, prompts, validation, evaluation | `app/src/ai/` · `app/src/modes/` · `app/src/services/bridgeClient.ts` · `bridge/src/parse/` · `bridge/prompts/` · `evals/` |
-| **Dhrey** | Database, memory, profiles, preferences, overrides, sessions, snapshots, policy, design system | `app/src/memory/` · `app/src/policy/` · `app/src/components/` · `app/src/theme/` · `app/src/store/` · `app/src/screens/{Onboarding,Profiles,Memory,History}/` · `app/src/services/sessionSync.ts` · `bridge/src/server/` |
+| **Dhrey** | Database, memory, profiles, preferences, overrides, sessions, snapshots, policy, design system, crash recovery | `app/src/memory/` · `app/src/policy/` · `app/src/components/` · `app/src/theme/` · `app/src/store/` · `app/src/screens/{Onboarding,Profiles,Memory,History}/` · `app/src/services/sessionSync.ts` · `bridge/src/server/` · `app/src/actions/__tests__/crashRecovery.test.ts` |
 
 ## 2. Phase 1 task allocation
 
