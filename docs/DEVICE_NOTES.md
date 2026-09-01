@@ -878,3 +878,146 @@ Two separate things came out of this:
 - Restore correctly leaves **memories alone**: after a clean End the taught preference and the
   stored priority contacts are still in the database, while `device_snapshot` is empty and
   `ally_dnd_policy.xml` is `<map />`. Snapshots are collateral; preferences are the product.
+
+---
+
+## Phase 5 — the wake-up alarm (2026-09-01, SM-S928B, Android 16 / API 36)
+
+Stock Clock: `com.sec.android.app.clockpackage` 12.5.60.27. Build verified `arm64-v8a`, installed
+13:30, `com.android.alarm.permission.SET_ALARM: granted=true`, and `queriesIntents` confirms the
+`<queries>` block took effect.
+
+### The API choice, and the thing it costs us
+
+`android.provider.AlarmClock`, **not** `AlarmManager`. An AlarmManager alarm never appears in the
+Clock app, dies with the app's data, and cannot be edited or silenced by the user anywhere they
+would look. Phase 5 asks for a real alarm, so Android owns it.
+
+**There is no public read-back, and it is not merely absent from the SDK.** `AlarmClock` exposes
+SET, DISMISS and SHOW; there is no `getAlarms()`. The Samsung Clock's own provider is closed even
+to the adb shell user:
+
+```text
+$ adb shell content query --uri content://com.sec.android.app.clockpackage/alarm
+Error while accessing provider:com.sec.android.app.clockpackage
+java.lang.SecurityException: Permission Denial
+```
+
+So `applied` for an alarm means *a real Clock activity resolved and accepted the intent* — and the
+message says "Sent to your Clock app", never "your alarm is set". Everything below was verified by
+opening the Clock and looking.
+
+### One-shot — VERIFIED
+
+`"Wake me at 7 AM."` in the stock Clock:
+
+```text
+Ally wake-up
+07:00                    [enabled]
+Wed, 2 Sept              <- a DATE, so one-shot
+```
+
+Compare the user's own 06:00 two rows above, which shows `S M T W T F S`. `EXTRA_SKIP_UI` was
+honoured: no Clock editor opened, the alarm simply appeared.
+
+### Weekdays — VERIFIED
+
+`"I'm going to sleep. Wake me at 7 AM on weekdays."` produced a second entry, side by side with the
+one-shot, so the difference is visible in a single screenshot:
+
+```text
+Ally wake-up
+07:00                    [enabled]
+S  M T W T F  S          <- M-F highlighted, both S grey
+```
+
+### Unrelated alarms — UNTOUCHED throughout
+
+This phone had roughly twenty pre-existing alarms, several labelled "Wake up dhrey". Every one was
+still present and still in its original off state after every test. Ally cannot address them even
+by accident: dismissal searches by the label `Ally wake-up`, which is the only handle the platform
+offers and is therefore also the safety property.
+
+### Idempotency — VERIFIED, and needed
+
+A Sleep plan contains the alarm action TWICE (Shlok's `requestedChanges` plus the planner's
+`schedule` append). The harness showed both rows for one sentence:
+
+```text
+Skipped   null -> 07:00   That alarm was already sent to your Clock app.
+Applied   null -> 07:00   Sent to your Clock app: Ally wake-up at 07:00.
+                          [com.sec.android.app.clockpackage]
+```
+
+One sentence, one alarm. The record is on disk and survives process death:
+
+```xml
+<map>
+  <string name="sess_mtie9rc0_yvyn42rz">07:00|weekdays</string>
+  <string name="sess_mtidso71_ukntmgh6">07:00|once</string>
+</map>
+```
+
+### DISMISSAL DOES NOT WORK ON THIS PHONE — measured, not assumed
+
+`ACTION_DISMISS_ALARM` with `ALARM_SEARCH_MODE_LABEL` is accepted, and the alarm **stays in the
+Clock, still enabled**. Confirmed two independent ways:
+
+1. through Ally's own button, and
+2. by firing the intent straight from adb with `ALARM_SEARCH_MODE_TIME` — bypassing Ally entirely.
+
+Samsung's Clock appears to honour DISMISS only for an alarm that is currently ringing or snoozed,
+which is consistent with what the API documents and is *not* what "cancel my alarm" means.
+
+Consequences, stated plainly:
+
+- **A5.5 cancellation is platform-limited.** The intent is correct and accepted; the phone does not
+  act on it. Ally reports `accepted`, never "dismissed", and tells the user to check their Clock.
+- **A5.4 modification leaves a duplicate.** Dismiss-then-set is the only sequence the platform
+  offers — there is no "edit alarm" intent — so 07:00 to 07:30 leaves both.
+- Deleting an Ally alarm requires the user to do it in the Clock app.
+
+The first version of this code reported `ok: true` for dismissal with no qualification. Watching
+the alarm survive that is what got it changed.
+
+### Sleep lifecycle and restoration — VERIFIED
+
+| Stage | brightness | zen | Ally's zen rule |
+|---|---|---|---|
+| Before | 187 | 0 | STATE_FALSE |
+| Sleep active | 26 (10%) | 3 (alarms only) | STATE_TRUE |
+| After force-stop (fresh pid) | 26 | 3 | STATE_TRUE |
+| **After End** | **187** | **0** | **STATE_FALSE** |
+
+Run twice — once for the one-shot session, once for the weekday session — both across a real
+force-stop. **The alarm remained in the Clock both times**, which is the point: ending Sleep must
+not take tomorrow's alarm with it. `device_snapshot` was empty afterwards and both sessions IDLE.
+
+### Database upgrade — VERIFIED on real data
+
+The phone was still at migrations 001-002 with live data. Installing the Phase 5 build ran the rest
+against it:
+
+```text
+I ReactNativeJS: Applying migration: 003_snapshot_first_write_wins
+I ReactNativeJS: Applying migration: 004_preference_unique
+I ReactNativeJS: Applying migration: 005_alarm_metadata
+```
+
+Afterwards all five recorded, `alarm_metadata` created, and existing data intact (1 preference,
+2 priority rows, 9 sessions). Dhrey's rows also independently corroborate the recurrence binding:
+
+```json
+{"time":"07:00","recurrence":"once",     "sessionId":"sess_mtidso71_ukntmgh6"}
+{"time":"07:00","recurrence":"weekdays", "sessionId":"sess_mtie9rc0_yvyn42rz"}
+```
+
+**The Phase 4 database defect is NOT fixed.** `getDatabase()` still caches a module-level handle
+with no liveness check and no reconnect. It did not resurface during Phase 5, but nothing has
+changed that would prevent it. Dhrey's file.
+
+### Harness quirk worth knowing before the demo
+
+Taps do not land reliably for a second or two after a scroll, and immediately after a force-stop the
+JS bundle is still loading. Several "the button did nothing" moments here were one of those two.
+Force-stop, wait for the app to draw, then tap the button at its resting position.

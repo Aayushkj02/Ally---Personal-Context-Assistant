@@ -1004,3 +1004,59 @@ Because entries never move and IDs never collide, a merge conflict here is alway
   it (ADR-125) still reaches the screen. Reasons are cleared on a restore: a restore is driven by
   snapshots rather than a plan, so there is nothing to explain, and leaving the apply's reasons in
   place would caption "Restored" rows with why they were changed in the first place.
+
+### ADR-127 — The wake-up alarm is an AlarmClock intent, and `applied` means "the Clock took it"
+- **Date:** 2026-09-01 · **Author:** Aayush · **Phase:** 5 · **Status:** Accepted
+- **Decision:** `AlarmController.kt` uses `android.provider.AlarmClock` (`ACTION_SET_ALARM`,
+  `ACTION_DISMISS_ALARM`, `ACTION_SHOW_ALARMS`) rather than `AlarmManager`. `applied` is defined
+  down to what is actually checkable — a real Clock activity resolved, and `startActivity` accepted
+  it — and the user-facing wording is "Sent to your Clock app", never "your alarm is set".
+  Recurrence reaches the capability through an injected `AlarmContext` rather than the ActionPlan.
+  Idempotency is keyed by `(sessionId → "HH:MM|recurrence")` in SharedPreferences. Every alarm
+  carries the label `Ally wake-up`, which is also the only thing dismissal can address.
+- **Reason:** An `AlarmManager` alarm belongs to Ally: it never appears in the Clock app, it dies
+  with the app's data, and the user cannot see, edit or silence it anywhere they would think to
+  look. Phase 5 asks for a REAL wake-up alarm, so Android owns it from the moment the intent is
+  sent. The permission follows from the API: `SET_ALARM` replaced the `SCHEDULE_EXACT_ALARM` the
+  manifest declared for this feature, which gated the API we deliberately do not use —
+  `getPermissionStatus('exact_alarm')` was reporting `canScheduleExactAlarms()`, so the UI could
+  have sent the user to grant something with no effect on this capability while the permission it
+  does need went undeclared.
+- **The read-back rule is genuinely unsatisfiable here, so it is narrowed rather than faked.**
+  `AlarmClock` exposes SET, DISMISS and SHOW; there is no provider and no `getAlarms()`. Confirmed
+  beyond the SDK: `content query --uri content://com.sec.android.app.clockpackage/alarm` is refused
+  even to the adb shell user. Everywhere else `applied` means "written and read back" (NFR-03);
+  pretending that here would be the exact lie the vocabulary exists to prevent, and silently
+  weakening the word without saying so would be worse. So the claim is stated at its true strength
+  and the acceptance evidence is a human opening the stock Clock (DEVICE_NOTES).
+- **Recurrence cannot travel in the plan.** `PlannedAction.value` is `CapabilityValue = string |
+  number` and `src/types/` is frozen, so a one-shot and a weekday alarm are byte-identical by the
+  time they reach the executor — verified by running both sentences through the real pipeline. The
+  recurrence the user actually said survives in `intent.schedule.kind`, which the app shell already
+  holds, so the shell composes the device via `withAlarmContext()` and hands it to `startContext()`.
+  That is the rule the executor already lives by (ADR-115), and it keeps a second recurrence model
+  from growing. Nothing is inferred from absence: no context means one-shot and `EXTRA_DAYS` is
+  never sent.
+- **Idempotency exists because the plan asks twice.** Running the Sleep sentence through the real
+  orchestrator produces `[dnd, brightness, alarm 07:00, alarm 07:00]` — Shlok puts the alarm in
+  `requestedChanges` so it resolves as a `command` entry, and `buildActionPlan` then appends a
+  second one from `schedule`. Fixing that upstream is Dhrey's planner; making it harmless is
+  Aayush's, so the second identical request reports `skipped` and sends nothing. Consequently
+  `summarisePlan()` now counts `skipped` as settled, matching `summariseRestore()` — otherwise a
+  flawless Sleep run would report PARTIAL and tell the user something went wrong when the opposite
+  happened.
+- **Alternatives considered:** `AlarmManager` — invisible in the Clock, which is the one thing
+  Phase 5 requires. Encode recurrence in the value string ("07:00|weekdays") — it would slip past
+  `validatePolicyInput`, which never sees the appended alarm action, and that is precisely why it
+  is the wrong move: a contract violation nothing would catch. Widen `CapabilityValue` — a frozen
+  contract three people own. Dedupe inside the executor — the executor honours the plan it is
+  given; deciding two actions are "really one" is policy.
+- **Impact, measured on SM-S928B:** dismissal DOES NOT WORK on this phone. `ACTION_DISMISS_ALARM`
+  is accepted and the scheduled alarm survives, still enabled — confirmed twice, through Ally and
+  by firing the intent from adb with `ALARM_SEARCH_MODE_TIME`, bypassing Ally entirely. Samsung's
+  Clock honours DISMISS for a ringing or snoozed alarm, not a pending one. So `ok` there means
+  ACCEPTED and the message says the user should check their Clock, and modification (dismiss then
+  set) leaves the old alarm behind. Deleting an Ally alarm requires the user to do it in the Clock.
+  The idempotency record is still cleared on dismissal, deliberately: keeping it would mean a user
+  who asks again gets `skipped` and no alarm at all, and a duplicate is noise where a missing
+  wake-up is a missed morning.
