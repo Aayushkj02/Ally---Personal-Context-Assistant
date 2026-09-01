@@ -16,7 +16,7 @@ import { ACTION_STATUSES, STATUS_PRESENTATION } from '../../types';
 import type { ActionPlan, ActionResult, SessionState } from '../../types';
 import { useStore } from '../../store';
 
-const COMPONENT_NAMES = ['Text', 'Button', 'Card', 'StatusChip', 'Timer', 'PermissionRow'] as const;
+const COMPONENT_NAMES = ['Text', 'Button', 'Card', 'StatusChip', 'Timer', 'PermissionRow', 'StatusRow', 'ModeIndicator'] as const;
 
 const COMPONENT_DIR = join(__dirname, '..');
 
