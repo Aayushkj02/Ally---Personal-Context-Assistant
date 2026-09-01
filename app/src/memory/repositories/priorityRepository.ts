@@ -43,15 +43,20 @@ function toModel(r: Row): PriorityPreference {
 export const priorityRepository = {
   /** Every preference for one mode, ordered so the UI renders stably. */
   async listForProfile(profileId: string): Promise<PriorityPreference[]> {
-    const db = await getDatabase();
-    const rows = await db.getAllAsync<Row>(
-      `SELECT id, profileId, channel, subject, subjectKind, enabled, enforceable, sourceCommand, createdAt
-         FROM priority_preference
-        WHERE profileId = ?
-        ORDER BY channel ASC, createdAt ASC`,
-      [profileId],
-    );
-    return rows.map(toModel);
+    try {
+      const db = await getDatabase();
+      const rows = await db.getAllAsync<Row>(
+        `SELECT id, profileId, channel, subject, subjectKind, enabled, enforceable, sourceCommand, createdAt
+           FROM priority_preference
+          WHERE profileId = ?
+          ORDER BY channel ASC, createdAt ASC`,
+        [profileId],
+      );
+      return rows.map(toModel);
+    } catch (e) {
+      console.warn('Failed to read priority preferences:', e);
+      return [];
+    }
   },
 
   /**
@@ -68,62 +73,78 @@ export const priorityRepository = {
     sourceCommand?: string | null;
     now?: number;
   }): Promise<PriorityPreference> {
-    const db = await getDatabase();
-    const subject = input.subject.trim();
-    if (!subject) {
-      throw new Error('A priority contact needs a name.');
+    try {
+      const db = await getDatabase();
+      const subject = input.subject.trim();
+      if (!subject) {
+        throw new Error('A priority contact needs a name.');
+      }
+
+      const now = input.now ?? Date.now();
+      const id = `pp_${now.toString(36)}_${Math.random().toString(36).slice(2, 9)}`;
+
+      await db.runAsync(
+        `INSERT INTO priority_preference
+           (id, profileId, channel, subject, subjectKind, enabled, enforceable, sourceCommand, createdAt)
+         VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?)
+         ON CONFLICT (profileId, channel, subject)
+           DO UPDATE SET enabled = 1`,
+        [
+          id,
+          input.profileId,
+          input.channel,
+          subject,
+          input.subjectKind ?? 'contact',
+          CHANNEL_ENFORCEABLE[input.channel] ? 1 : 0,
+          input.sourceCommand ?? null,
+          now,
+        ],
+      );
+
+      const row = await db.getFirstAsync<Row>(
+        `SELECT id, profileId, channel, subject, subjectKind, enabled, enforceable, sourceCommand, createdAt
+           FROM priority_preference
+          WHERE profileId = ? AND channel = ? AND subject = ?`,
+        [input.profileId, input.channel, subject],
+      );
+      if (!row) {
+        throw new Error('Preference was not stored.');
+      }
+      return toModel(row);
+    } catch (e) {
+      throw new Error(`Persistence failed: ${e instanceof Error ? e.message : 'Unknown error'}`);
     }
-
-    const now = input.now ?? Date.now();
-    const id = `pp_${now.toString(36)}_${Math.random().toString(36).slice(2, 9)}`;
-
-    await db.runAsync(
-      `INSERT INTO priority_preference
-         (id, profileId, channel, subject, subjectKind, enabled, enforceable, sourceCommand, createdAt)
-       VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?)
-       ON CONFLICT (profileId, channel, subject)
-         DO UPDATE SET enabled = 1`,
-      [
-        id,
-        input.profileId,
-        input.channel,
-        subject,
-        input.subjectKind ?? 'contact',
-        CHANNEL_ENFORCEABLE[input.channel] ? 1 : 0,
-        input.sourceCommand ?? null,
-        now,
-      ],
-    );
-
-    const row = await db.getFirstAsync<Row>(
-      `SELECT id, profileId, channel, subject, subjectKind, enabled, enforceable, sourceCommand, createdAt
-         FROM priority_preference
-        WHERE profileId = ? AND channel = ? AND subject = ?`,
-      [input.profileId, input.channel, subject],
-    );
-    if (!row) {
-      throw new Error('Preference was not stored.');
-    }
-    return toModel(row);
   },
 
   /** Toggles without deleting, so the user's list survives being turned off and on. */
   async setEnabled(id: string, enabled: boolean): Promise<void> {
-    const db = await getDatabase();
-    await db.runAsync('UPDATE priority_preference SET enabled = ? WHERE id = ?', [
-      enabled ? 1 : 0,
-      id,
-    ]);
+    try {
+      const db = await getDatabase();
+      await db.runAsync('UPDATE priority_preference SET enabled = ? WHERE id = ?', [
+        enabled ? 1 : 0,
+        id,
+      ]);
+    } catch (e) {
+      throw new Error(`Persistence failed: ${e instanceof Error ? e.message : 'Unknown error'}`);
+    }
   },
 
   async removePreference(id: string): Promise<void> {
-    const db = await getDatabase();
-    await db.runAsync('DELETE FROM priority_preference WHERE id = ?', [id]);
+    try {
+      const db = await getDatabase();
+      await db.runAsync('DELETE FROM priority_preference WHERE id = ?', [id]);
+    } catch (e) {
+      throw new Error(`Persistence failed: ${e instanceof Error ? e.message : 'Unknown error'}`);
+    }
   },
 
   /** Wipes one mode's list. */
   async clearProfile(profileId: string): Promise<void> {
-    const db = await getDatabase();
-    await db.runAsync('DELETE FROM priority_preference WHERE profileId = ?', [profileId]);
+    try {
+      const db = await getDatabase();
+      await db.runAsync('DELETE FROM priority_preference WHERE profileId = ?', [profileId]);
+    } catch (e) {
+      throw new Error(`Persistence failed: ${e instanceof Error ? e.message : 'Unknown error'}`);
+    }
   },
 };

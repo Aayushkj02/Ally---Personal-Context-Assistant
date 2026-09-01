@@ -11,7 +11,8 @@
     "eval": "jest src/ai/__tests__/eval.test.ts",
     "start": "expo start --dev-client",
     "android": "expo run:android",
-    "prebuild": "expo prebuild --platform android"
+    "prebuild": "expo prebuild --platform android",
+    "reset:demo": "npx tsx src/memory/resetDemo.ts"
   },
   "devDependencies": {
     "@react-native/jest-preset": "^0.86.3",
