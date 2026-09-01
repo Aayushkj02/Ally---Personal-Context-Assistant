@@ -100,9 +100,10 @@ async function forgetAll(): Promise<void> {
 async function activateStudy(): Promise<Extract<ActivationOutcome, { kind: 'activated' }>> {
   const outcome = await activateFromText(STUDY_SENTENCE, { engine: offlineEngine });
   if (outcome.kind !== 'activated') {
-    const errorMsg = outcome.kind === 'clarification'
-      ? outcome.clarification.question
-      : `unexpected kind: ${outcome.kind}`;
+    const errorMsg =
+      outcome.kind === 'clarification'
+        ? outcome.clarification.question
+        : `unexpected kind: ${outcome.kind}`;
     throw new Error(`expected an activation, got: ${errorMsg}`);
   }
   return outcome;

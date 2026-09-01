@@ -87,7 +87,7 @@ describe('D4.2 — Teaching Persistence Routing', () => {
 
     const prefs = await profileRepository.getPreferencesByProfile(outcome.profile.id);
     expect(prefs).toHaveLength(2);
-    expect(prefs.map(p => p.capability).sort()).toEqual(['brightness', 'ringer']);
+    expect(prefs.map((p) => p.capability).sort()).toEqual(['brightness', 'ringer']);
   });
 
   it('D42-4 — Last-write-wins through real orchestrator flow', async () => {
@@ -104,7 +104,10 @@ describe('D4.2 — Teaching Persistence Routing', () => {
       requestedChanges: [{ capability: 'brightness', value: 20 }],
     });
 
-    const outcome2 = await activateFromText('Actually, keep brightness at 20', { engine: engine2, now: Date.now() + 1000 });
+    const outcome2 = await activateFromText('Actually, keep brightness at 20', {
+      engine: engine2,
+      now: Date.now() + 1000,
+    });
     expect(outcome2.kind).toBe('taught');
 
     const prefs = await profileRepository.getPreferencesByProfile(outcome1.profile.id);
@@ -117,7 +120,9 @@ describe('D4.2 — Teaching Persistence Routing', () => {
 
   it('D42-5 — Positive exception persistence', async () => {
     const engine = mockEngine({
-      exceptions: [{ type: 'contact', value: 'Mom', channel: 'calls', effect: 'allow', durationMinutes: null }],
+      exceptions: [
+        { type: 'contact', value: 'Mom', channel: 'calls', effect: 'allow', durationMinutes: null },
+      ],
     });
 
     const outcome = await activateFromText('Let Mom call me', { engine });
@@ -134,7 +139,9 @@ describe('D4.2 — Teaching Persistence Routing', () => {
 
   it('D42-6 — Block/correction is NOT implemented as D4.2', async () => {
     const engine = mockEngine({
-      exceptions: [{ type: 'contact', value: 'Bob', channel: 'sms', effect: 'block', durationMinutes: null }],
+      exceptions: [
+        { type: 'contact', value: 'Bob', channel: 'sms', effect: 'block', durationMinutes: null },
+      ],
     });
 
     const outcome = await activateFromText('Do not let Bob text me', { engine });
@@ -159,7 +166,9 @@ describe('D4.2 — Teaching Persistence Routing', () => {
 
     // No preferences created
     const db = await getDatabase();
-    const prefsCount = await db.getFirstAsync<{ c: number }>('SELECT count(*) as c FROM preference');
+    const prefsCount = await db.getFirstAsync<{ c: number }>(
+      'SELECT count(*) as c FROM preference',
+    );
     expect(prefsCount?.c).toBe(0);
   });
 
@@ -171,7 +180,10 @@ describe('D4.2 — Teaching Persistence Routing', () => {
     await activateFromText('Log this command once', { engine });
 
     const db = await getDatabase();
-    const logs = await db.getAllAsync<{ id: string }>('SELECT id FROM command_log WHERE rawText = ?', ['Log this command once']);
+    const logs = await db.getAllAsync<{ id: string }>(
+      'SELECT id FROM command_log WHERE rawText = ?',
+      ['Log this command once'],
+    );
 
     // Exactly 1 log entry
     expect(logs).toHaveLength(1);
@@ -180,7 +192,15 @@ describe('D4.2 — Teaching Persistence Routing', () => {
   describe('D4.3 — Correction & Removal Routing', () => {
     it('D43-1 — Positive preference can be removed', async () => {
       const allowEngine = mockEngine({
-        exceptions: [{ type: 'contact', value: 'Mom', channel: 'calls', effect: 'allow', durationMinutes: null }],
+        exceptions: [
+          {
+            type: 'contact',
+            value: 'Mom',
+            channel: 'calls',
+            effect: 'allow',
+            durationMinutes: null,
+          },
+        ],
       });
       const o1 = await activateFromText('Let Mom call me', { engine: allowEngine });
       expect(o1.kind).toBe('taught');
@@ -190,7 +210,15 @@ describe('D4.2 — Teaching Persistence Routing', () => {
       expect(priorities.some((p) => p.subject === 'Mom')).toBe(true);
 
       const blockEngine = mockEngine({
-        exceptions: [{ type: 'contact', value: 'Mom', channel: 'calls', effect: 'block', durationMinutes: null }],
+        exceptions: [
+          {
+            type: 'contact',
+            value: 'Mom',
+            channel: 'calls',
+            effect: 'block',
+            durationMinutes: null,
+          },
+        ],
       });
       await activateFromText('Remove Mom', { engine: blockEngine });
 
@@ -200,7 +228,15 @@ describe('D4.2 — Teaching Persistence Routing', () => {
 
     it('D43-2 — Correction does not execute device actions', async () => {
       const blockEngine = mockEngine({
-        exceptions: [{ type: 'contact', value: 'Mom', channel: 'calls', effect: 'block', durationMinutes: null }],
+        exceptions: [
+          {
+            type: 'contact',
+            value: 'Mom',
+            channel: 'calls',
+            effect: 'block',
+            durationMinutes: null,
+          },
+        ],
       });
       const outcome = await activateFromText('Remove Mom', { engine: blockEngine });
 
@@ -211,15 +247,35 @@ describe('D4.2 — Teaching Persistence Routing', () => {
     it('D43-3 — Correct natural key isolation', async () => {
       const allowEngine = mockEngine({
         exceptions: [
-          { type: 'contact', value: 'Mom', channel: 'calls', effect: 'allow', durationMinutes: null },
-          { type: 'contact', value: 'Dad', channel: 'calls', effect: 'allow', durationMinutes: null }
+          {
+            type: 'contact',
+            value: 'Mom',
+            channel: 'calls',
+            effect: 'allow',
+            durationMinutes: null,
+          },
+          {
+            type: 'contact',
+            value: 'Dad',
+            channel: 'calls',
+            effect: 'allow',
+            durationMinutes: null,
+          },
         ],
       });
       const o1 = await activateFromText('Let Mom and Dad call me', { engine: allowEngine });
       if (o1.kind !== 'taught') return;
 
       const blockEngine = mockEngine({
-        exceptions: [{ type: 'contact', value: 'Mom', channel: 'calls', effect: 'block', durationMinutes: null }],
+        exceptions: [
+          {
+            type: 'contact',
+            value: 'Mom',
+            channel: 'calls',
+            effect: 'block',
+            durationMinutes: null,
+          },
+        ],
       });
       await activateFromText('Remove Mom', { engine: blockEngine });
 
@@ -230,13 +286,29 @@ describe('D4.2 — Teaching Persistence Routing', () => {
 
     it('D43-4 — Repeated correction safety', async () => {
       const allowEngine = mockEngine({
-        exceptions: [{ type: 'contact', value: 'Mom', channel: 'calls', effect: 'allow', durationMinutes: null }],
+        exceptions: [
+          {
+            type: 'contact',
+            value: 'Mom',
+            channel: 'calls',
+            effect: 'allow',
+            durationMinutes: null,
+          },
+        ],
       });
       const o1 = await activateFromText('Let Mom call me', { engine: allowEngine });
       if (o1.kind !== 'taught') return;
 
       const blockEngine = mockEngine({
-        exceptions: [{ type: 'contact', value: 'Mom', channel: 'calls', effect: 'block', durationMinutes: null }],
+        exceptions: [
+          {
+            type: 'contact',
+            value: 'Mom',
+            channel: 'calls',
+            effect: 'block',
+            durationMinutes: null,
+          },
+        ],
       });
       await activateFromText('Remove Mom', { engine: blockEngine });
       await activateFromText('Remove Mom again', { engine: blockEngine }); // Repeated
@@ -247,10 +319,26 @@ describe('D4.2 — Teaching Persistence Routing', () => {
 
     it('D43-5 — Allow after block', async () => {
       const allowEngine = mockEngine({
-        exceptions: [{ type: 'contact', value: 'Mom', channel: 'calls', effect: 'allow', durationMinutes: null }],
+        exceptions: [
+          {
+            type: 'contact',
+            value: 'Mom',
+            channel: 'calls',
+            effect: 'allow',
+            durationMinutes: null,
+          },
+        ],
       });
       const blockEngine = mockEngine({
-        exceptions: [{ type: 'contact', value: 'Mom', channel: 'calls', effect: 'block', durationMinutes: null }],
+        exceptions: [
+          {
+            type: 'contact',
+            value: 'Mom',
+            channel: 'calls',
+            effect: 'block',
+            durationMinutes: null,
+          },
+        ],
       });
 
       const o1 = await activateFromText('Let Mom call me', { engine: allowEngine });
@@ -264,7 +352,9 @@ describe('D4.2 — Teaching Persistence Routing', () => {
 
     it('D43-6 — Block does not create contradictory memory', async () => {
       const blockEngine = mockEngine({
-        exceptions: [{ type: 'contact', value: 'Bob', channel: 'sms', effect: 'block', durationMinutes: null }],
+        exceptions: [
+          { type: 'contact', value: 'Bob', channel: 'sms', effect: 'block', durationMinutes: null },
+        ],
       });
       const o1 = await activateFromText('Do not let Bob text me', { engine: blockEngine });
       if (o1.kind !== 'taught') return;
@@ -277,9 +367,19 @@ describe('D4.2 — Teaching Persistence Routing', () => {
       const tempEngine = mockEngine({
         operation: 'modify',
         persistence: 'temporary', // explicitly temporary
-        exceptions: [{ type: 'contact', value: 'Mom', channel: 'calls', effect: 'allow', durationMinutes: null }],
+        exceptions: [
+          {
+            type: 'contact',
+            value: 'Mom',
+            channel: 'calls',
+            effect: 'allow',
+            durationMinutes: null,
+          },
+        ],
       });
-      const outcome = await activateFromText('During this study session, let Mom call', { engine: tempEngine });
+      const outcome = await activateFromText('During this study session, let Mom call', {
+        engine: tempEngine,
+      });
 
       // Should NOT be intercepted by persistent routing
       expect(outcome.kind).toBe('activated');

@@ -19,7 +19,7 @@
 import { intentEngine, type IntentEngine } from '../ai';
 import { IntentValidator } from '../ai/validators';
 import { commandRepository, loadProfileContext, startSession } from '../memory';
-import { profileRepository, priorityRepository } from '../memory/repositories';
+import { profileRepository, priorityRepository, alarmRepository } from '../memory/repositories';
 import { getModeDefinition, type ModeDefinition } from '../modes';
 import { buildActionPlan, resolve, resolvePriority } from '../policy';
 import type { ResolvedPriority } from '../policy';
@@ -201,7 +201,7 @@ export async function activateFromText(
         const target = allPrefs.find(
           (p) =>
             p.channel === (exception.channel ?? 'calls') &&
-            p.subject.toLowerCase() === exception.value.toLowerCase()
+            p.subject.toLowerCase() === exception.value.toLowerCase(),
         );
         if (target) {
           await priorityRepository.removePreference(target.id);
@@ -246,8 +246,24 @@ export async function activateFromText(
     durationMinutes: intent.durationMinutes,
   });
 
+  // 7.5 Phase 5 Sleep Session & Alarm Metadata (D5.4)
+  if (
+    intent.activity === 'sleep' &&
+    intent.schedule &&
+    intent.schedule.kind !== 'none' &&
+    intent.schedule.time
+  ) {
+    await alarmRepository.createAlarmMetadata({
+      id: newId('alarm', now),
+      sessionId: session.id,
+      time: intent.schedule.time,
+      recurrence: intent.schedule.kind,
+      createdAt: now,
+    });
+  }
+
   // 8. Hand off across contract boundary 2.
-  const plan = buildActionPlan(session.id, policy, intent.persistence);
+  const plan = buildActionPlan(session.id, policy, intent.persistence, intent.schedule);
 
   return { kind: 'activated', intent, profile, policy, plan, priority };
 }

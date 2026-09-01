@@ -106,11 +106,11 @@ describe('D4.1 Preference Uniqueness and UPSERT', () => {
     // Insert bypassing repository to guarantee creation order independent of UPSERTs
     await db.runAsync(
       'INSERT INTO preference (id, profileId, capability, value, source, sourceCommand, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?)',
-      ['p2', STUDY, 'dnd', '"off"', 'user', null, 2000]
+      ['p2', STUDY, 'dnd', '"off"', 'user', null, 2000],
     );
     await db.runAsync(
       'INSERT INTO preference (id, profileId, capability, value, source, sourceCommand, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?)',
-      ['p1', STUDY, 'brightness', '50', 'user', null, 1000]
+      ['p1', STUDY, 'brightness', '50', 'user', null, 1000],
     );
 
     const list = await profileRepository.getPreferencesByProfile(STUDY);
@@ -126,15 +126,15 @@ describe('D4.1 Preference Uniqueness and UPSERT', () => {
 
     await db.runAsync(
       'INSERT INTO preference (id, profileId, capability, value, source, sourceCommand, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?)',
-      ['id1', STUDY, 'brightness', '40', 'user', null, 1000]
+      ['id1', STUDY, 'brightness', '40', 'user', null, 1000],
     );
 
     // Raw insert bypassing ON CONFLICT should throw
     await expect(
       db.runAsync(
         'INSERT INTO preference (id, profileId, capability, value, source, sourceCommand, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?)',
-        ['id2', STUDY, 'brightness', '30', 'user', null, 2000]
-      )
+        ['id2', STUDY, 'brightness', '30', 'user', null, 2000],
+      ),
     ).rejects.toThrow(/UNIQUE constraint failed/);
   });
 });

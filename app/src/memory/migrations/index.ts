@@ -10,6 +10,7 @@ import { up as initialSchema } from './001_initial_schema';
 import { up as priorityPreference } from './002_priority_preference';
 import { up as snapshotFirstWriteWins } from './003_snapshot_first_write_wins';
 import { up as preferenceUnique } from './004_preference_unique';
+import { up as alarmMetadata } from './005_alarm_metadata';
 
 export async function runMigrations(db: SQLite.SQLiteDatabase): Promise<void> {
   await db.execAsync(`
@@ -28,6 +29,7 @@ export async function runMigrations(db: SQLite.SQLiteDatabase): Promise<void> {
     { name: '002_priority_preference', up: priorityPreference },
     { name: '003_snapshot_first_write_wins', up: snapshotFirstWriteWins },
     { name: '004_preference_unique', up: preferenceUnique },
+    { name: '005_alarm_metadata', up: alarmMetadata },
   ];
 
   for (const migration of migrations) {
