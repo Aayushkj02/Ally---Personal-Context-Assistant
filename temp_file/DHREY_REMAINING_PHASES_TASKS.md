@@ -456,9 +456,27 @@ Ensure the session can be queried later.
 
 ## Phase Goal
 
-Support the approved Office Kit workflow and provide a stable shared UI/data foundation.
+Prepare and support the approved Office Kit workflow in software, and provide a stable shared UI/data foundation.
 
-Do not invent new Office Kit capabilities.
+> **Important clarification about Office Kit availability**
+> 
+> The team **does NOT have the Office Kit right now**.
+> 
+> The Office Kit will be provided **only if we qualify for the Pune round**. Until then, the team is developing and testing the prototype using **Aayush’s Samsung Galaxy S24 Ultra**.
+> 
+> **Current stage (before Pune qualification):**
+> * Use the **Samsung Galaxy S24 Ultra** for available device-level testing.
+> * Dhrey focuses on the **data, memory, policy, session, UI, store, and integration logic** required for the approved Office Kit scenarios.
+> * Office Kit scenarios can be implemented and tested at the software/data/logic level without the physical kit.
+> * Do not block completion of Phase 6 on having Office Kit hardware.
+> 
+> **After qualifying for the Pune round:**
+> * The team receives the physical Office Kit.
+> * Hardware-specific validation and integration testing can then be performed against the actual Office Kit.
+> 
+> We are strictly preparing and supporting the approved Office Kit workflow, not physically testing the Office Kit.
+
+Do not invent new Office Kit capabilities or add unnecessary hardware requirements.
 
 ---
 
