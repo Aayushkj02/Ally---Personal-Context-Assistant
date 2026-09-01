@@ -16,6 +16,9 @@ import {
   createBorrowedPolicy,
   getNativeDeviceInfo,
   runDndProbe,
+  allyNativeSpike,
+  pickContact,
+  contactPickerAvailable,
   setPriorityCallers,
   applyPriorityPreferences,
   analyseCallLog,
@@ -39,9 +42,13 @@ export const borrowedPolicy: BorrowedPolicy = createBorrowedPolicy() ?? mockBorr
 
 export const isMockBackend = device.backend === 'mock';
 
+export type { PickedContact } from './AllyNative';
 export {
   getNativeDeviceInfo,
   runDndProbe,
+  allyNativeSpike,
+  pickContact,
+  contactPickerAvailable,
   setPriorityCallers,
   applyPriorityPreferences,
   analyseCallLog,
@@ -52,3 +59,19 @@ export {
   mockRegistry,
 };
 export type { AlarmContext } from './capabilities/AlarmCapability';
+
+/**
+ * Study Mode Focus Guard (A7). A redirect, not a block — see FocusGuard.ts for why that
+ * distinction is permanent on an ordinary install, and why every string about it is worded to
+ * keep it true.
+ */
+export {
+  DEMO_RESTRICTED_APPS,
+  focusGuardStatus,
+  activateFocusGuard,
+  deactivateFocusGuard,
+  openFocusGuardSettings,
+  syncFocusGuard,
+  focusGuardPresentation,
+} from './FocusGuard';
+export type { FocusGuardNativeStatus, FocusGuardPresentation, RestrictedApp } from './FocusGuard';

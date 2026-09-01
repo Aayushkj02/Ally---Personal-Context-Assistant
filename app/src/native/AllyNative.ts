@@ -103,6 +103,74 @@ export function runDndProbe(): Record<string, unknown> | null {
 }
 
 /**
+ * SPIKE ONLY — runs the ringer feasibility matrix on the real phone and returns the report.
+ *
+ * `ringer` has answered `not_supported` since Phase 2. This exists to find out whether that is
+ * still the honest answer or whether it has simply never been tried on hardware. It changes the
+ * user's actual ringer mode for the duration and restores it in a `finally`. Nothing in the action
+ * engine calls it, and it is removed if the answer turns out to be no.
+ */
+export async function allyNativeSpike(): Promise<Record<string, unknown>> {
+  if (!AllyNative) return { error: 'mock backend — no phone to spike' };
+  return {
+    available: AllyNative.ringerIsAvailable(),
+    policyAccess: AllyNative.ringerHasPolicyAccess(),
+    modeBefore: AllyNative.ringerGetMode(),
+    ...(await AllyNative.ringerSpike(3000)),
+  };
+}
+
+/**
+ * What the system contact picker handed back.
+ *
+ * `starred` is REPORTED, NEVER STORED. Ally's DND enforcement is scoped to starred contacts and
+ * nothing finer (ADR-111), so an unstarred priority contact is silenced anyway. Starring is
+ * changed in Contacts at any moment, so a persisted copy would go stale and start lying — Ally
+ * asks the phone each time it needs the answer.
+ */
+export interface PickedContact {
+  ok: boolean;
+  displayName?: string;
+  starred?: boolean;
+  /** 'cancelled' | 'unreadable' | 'no_name' | 'security' | 'error' | 'not_ready' | 'unavailable' */
+  reason?: string;
+}
+
+/** True when this phone has something that answers the pick intent (needs the `<queries>` entry). */
+export function contactPickerAvailable(): boolean {
+  return AllyNative ? AllyNative.contactPickerIsAvailable() : false;
+}
+
+/**
+ * Opens the system contact picker and resolves with what the user chose.
+ *
+ * ALWAYS RESOLVES, NEVER REJECTS. Cancelling is an ordinary thing to do and comes back as
+ * `{ ok: false, reason: 'cancelled' }` so a caller can quietly do nothing. A rejection here would
+ * surface to the user as a failure for something they did on purpose.
+ *
+ * Requests no contacts permission: the picker runs in the system's own process and the result
+ * carries a one-time read grant for the single chosen contact.
+ */
+export async function pickContact(): Promise<PickedContact> {
+  if (!AllyNative) return { ok: false, reason: 'unavailable' };
+  try {
+    const raw = await AllyNative.contactPickerOpen();
+    // Checked rather than cast. This value crosses the bridge from Kotlin, and a screen is about
+    // to write it to the database as a contact the user will see — a shape assumption here would
+    // be exactly the sort of unverified claim the rest of this layer refuses to make.
+    if (raw.ok !== true) {
+      return { ok: false, reason: typeof raw.reason === 'string' ? raw.reason : 'error' };
+    }
+    const displayName = typeof raw.displayName === 'string' ? raw.displayName.trim() : '';
+    if (displayName === '') return { ok: false, reason: 'no_name' };
+    return { ok: true, displayName, starred: raw.starred === true };
+  } catch {
+    // The bridge is the only thing that can throw here, and a dead bridge is not the user's doing.
+    return { ok: false, reason: 'error' };
+  }
+}
+
+/**
  * Applies the priority preferences Android can actually enforce.
  *
  * `whatsapp` is accepted so callers can pass a whole preference set, but it is NEVER sent to

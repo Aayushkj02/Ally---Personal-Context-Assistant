@@ -1224,3 +1224,112 @@ and the Sleep/alarm path on the new Home screen. Phase 5 validated the alarm on 
 - Auto-rotate was disabled on this phone during Phase 5 testing and has been **restored** to on.
 - The Priority screen's back button used to read "Back to device harness"; it now reads "Back",
   since the harness is no longer where back goes.
+
+## A7 — Study Mode Focus Guard (Samsung SM-S928B, Android 16 / API 36, targetSdk 36)
+
+Verified 2026-09-01 on the real phone. Instagram (`com.instagram.android`) as the social app,
+Clash Royale (`com.supercell.clashroyale`) as the game.
+
+### It is a REDIRECT, not a block. Do not let any copy drift on this.
+
+Real package suspension was probed first and is permanently out of reach:
+
+| Fact | Measured value |
+|---|---|
+| `android.permission.SUSPEND_APPS` | `prot=signature\|verifier\|role` |
+| Device owner / profile owner on user 0 | none (`mAppsSuspended=false`); PO exists only on user 150 = Knox Secure Folder |
+| `mUserSetupComplete` | `true` — device-owner provisioning would need a factory reset |
+| Samsung Digital Wellbeing (`com.samsung.android.forest`) | `/system/priv-app/DigitalWellbeing`, `privateFlags=[… PRIVILEGED …]` |
+| `PACKAGE_USAGE_STATS` | `signature\|privileged\|development\|appop\|retailDemo` — detection only, cannot act |
+| `QUERY_ALL_PACKAGES` | `normal` (not used; labels are supplied by the caller instead) |
+
+For reference, `pm suspend com.supercell.clashroyale` from an adb shell DOES produce a genuine block
+(`mCurrentFocus=android/…SuspendedAppActivity`, the game never starts). That is what real blocking
+looks like, and it is gated behind the permission above. Ally cannot reach it. Reverted immediately.
+
+### The redirect is faster than expected — the app never draws a frame
+
+`TYPE_WINDOW_STATE_CHANGED` arrives at the SPLASH/starting-window stage, before the app's own
+content is drawn, so the redirect lands during the launch animation:
+
+```
+Instagram    START 20:50:11.336
+             redirect recorded  ~11.366  (+30ms)
+             launcher resumed    11.397  (+61ms)
+             focus on launcher   11.477  (+141ms)
+             "Displayed com.instagram" lines in logcat: 0   <- never drew a frame
+             InputDispatcher: "Focus request (0): <null> … NO_WINDOW"  <- never got focus
+
+ClashRoyale  START 20:51:03.203
+             launcher resumed    03.381  (+178ms)
+             focus on launcher   03.408  (+205ms)
+             "Displayed com.supercell" lines: 0
+```
+
+What the user sees is ~140–210ms of the app's own splash screen, then home. Not the app's content.
+A screenshot burst caught Instagram's logo-and-"from Meta" splash mid-dismissal. This is smooth
+enough to demo.
+
+**Reliability when the service is bound: 16 of 17 attempts redirected.** 6/6 Instagram, 6/6 Clash
+Royale, 3/3 with `screencap` instrumentation running, plus 1 more. The single miss let Instagram
+open fully; no redirect was recorded for it, which is correct — `performGlobalAction()` returning
+false must not be logged as a success. Cause not isolated.
+
+Redirect counts matched attempt counts (no Home/relaunch loop). Clash Royale did retry itself once
+or twice, each retry redirected separately, spaced beyond the 1200ms per-package debounce.
+
+### ⚠ THE REAL FRAGILITY: the grant does not survive what you would expect
+
+This is the thing to check before demoing. Three different behaviours, all measured:
+
+| Event | `enabled_accessibility_services` | Guard actually works? |
+|---|---|---|
+| Reinstall (`expo run:android`) | dropped | **No** — must be re-enabled by hand |
+| `am force-stop com.ally.assistant` | **`null` — grant REVOKED** | **No** — must be re-enabled by hand |
+| `am kill` (ordinary background death) | still names the service | No for ~5–10s, then Android restarts the process and it recovers on its own |
+
+So a rebuild or a force-stop silently disarms Focus Guard. **Re-enable it immediately before the
+demo and confirm the card is green.** Ally does report this honestly — the card flips to
+"Focus Guard is not set up" and says distracting apps will open normally — but nothing re-arms it
+except the user.
+
+This is why availability is NOT read from `Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES`:
+`FocusGuard.isAvailable()` requires the grant AND `FocusGuardService.isConnected`, the latter set by
+the service's own lifecycle callbacks. The `am kill` case is precisely a state where the settings
+string lies.
+
+### Honesty bug this spike caught in our own code
+
+The guarding card read "Nothing has been opened yet" when no redirect had been recorded. During the
+~5–10s post-`am kill` window Instagram WAS opened and not redirected, and the card then asserted
+that nothing had been opened. Ally cannot know that — only `UsageStatsManager` could. Changed to
+"No redirects yet", which reports Ally's own record. Test added:
+`focusGuardPresentation` must not claim otherwise.
+
+### Setup path
+
+`Settings.ACTION_ACCESSIBILITY_SETTINGS` is the closest the public SDK gets — there is no deep link
+to a single service's toggle. On One UI the user still walks Installed apps → Ally Focus Guard →
+toggle → Allow. The card's copy spells that out. Verified: the button opened
+`com.android.settings/…Settings$AccessibilitySettingsActivity`.
+
+No "Restricted setting" block appeared on this device, even though Ally is adb-installed
+(`installerPackageName=null`). Do not assume that holds on another phone.
+
+### Other verified legs
+
+- Access OFF → card reads "Focus Guard is not set up", warns apps open normally. Study Mode ON in
+  that state → Instagram opened normally (`TotalTime: 766`) and stayed. No fake "Blocked".
+- Persistence is minimal and native (`shared_prefs/ally_focus_guard.xml`): `active`, `entries`
+  (`pkg|label` per line), `expires_at` = the session's own end time, plus redirect counters.
+  Survives process death; expires itself if Ally never comes back.
+- Study END → `active=false` (reconciled from the DB, not from React state), `zen_mode=0`,
+  `screen_brightness=187` (≈73%, the pre-session value). Instagram 450ms and Clash Royale 901ms
+  both opened normally, matching the pre-test baseline of 564ms / 927ms.
+- No overlay is used. `SYSTEM_ALERT_WINDOW` shows `rejectTime` on this phone — the user declined it —
+  so the message is a plain text toast, which a backgrounded app may still post.
+
+### Device left clean
+
+DND off, brightness restored, no suspended packages, test apps force-stopped, phone on the home
+screen. **Accessibility access is currently OFF** — revoked by the force-stop test above.

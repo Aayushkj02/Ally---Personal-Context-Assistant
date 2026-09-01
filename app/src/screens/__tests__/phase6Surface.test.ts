@@ -217,6 +217,41 @@ describe('A6.1 — a session recovered after a process death tells the truth', (
 });
 
 // ---------------------------------------------------------------------------
+// Priority — "Failed" must mean Android refused, not "we never asked"
+// ---------------------------------------------------------------------------
+
+describe('Priority — no verdict is shown before the device is asked', () => {
+  const editor = read('Priority/PriorityEditor.tsx');
+  const priority = read('Priority/index.tsx');
+
+  it('suppresses the enforceable-channel badge until Apply has run', () => {
+    // Found on SM-S928B: Calls and SMS showed a red "Failed" on a phone where nothing had been
+    // attempted — zen_mode=0, interruption filter ALL, no native call made. `describeEnforcement`
+    // was right; the screen was passing null (meaning "not asked") into a function that reads it
+    // as "asked and the device said nothing".
+    expect(editor).toMatch(/awaitingApply/);
+    expect(editor).toMatch(/CHANNEL_ENFORCEABLE\[channel\] && !applied/);
+    expect(priority).toMatch(/const applied = lastEnforcement !== null/);
+  });
+
+  it('still shows WhatsApp, whose preference_only is true before anyone presses anything', () => {
+    // preference_only is a fact about Android, not a verdict on an attempt, so it must not be
+    // hidden by the same gate.
+    expect(editor).toMatch(/rows\.length > 0 \|\| !CHANNEL_ENFORCEABLE\[channel\]/);
+  });
+
+  it('leaves the policy resolver alone — its `failed` branch is load-bearing elsewhere', () => {
+    const resolver = readFileSync(
+      join(SCREENS, '..', 'policy', 'resolver', 'priorityResolver.ts'),
+      'utf8',
+    );
+    // priorityIntegration.ts always passes explicit device rows, so a channel missing from a real
+    // report genuinely IS a failure there. Softening this would hide actual Android refusals.
+    expect(resolver).toMatch(/status: 'failed' as const/);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Office Kit — what this file does NOT cover
 // ---------------------------------------------------------------------------
 

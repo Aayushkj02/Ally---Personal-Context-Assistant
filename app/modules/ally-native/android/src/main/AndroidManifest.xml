@@ -48,5 +48,43 @@
     <intent>
       <action android:name="android.intent.action.SHOW_ALARMS" />
     </intent>
+    <!--
+      The SAME trap, hit a second time and caught on device. Without this entry
+      ContactPicker.isAvailable() returned false and resolvedPicker() returned "none" on a phone
+      whose picker then opened perfectly and returned a contact. A naive implementation would have
+      reported "not supported on this device" while the feature plainly worked.
+    -->
+    <intent>
+      <action android:name="android.intent.action.PICK" />
+      <data android:mimeType="vnd.android.cursor.dir/contact" />
+    </intent>
   </queries>
+
+  <!--
+    A7.2 - the Focus Guard accessibility service.
+
+    BIND_ACCESSIBILITY_SERVICE is declared as android:permission, which is the opposite of asking
+    for a permission: it says only the SYSTEM may bind this service. Its protection level is
+    signature, so nothing else could anyway. Ally holds no new permission for this feature.
+
+    exported="true" is REQUIRED and looks wrong. An accessibility service is started by the
+    system from outside the app, so it has to be exported to be bindable at all; the android:permission
+    line above is what keeps that safe. Setting it false makes the service invisible on the
+    accessibility screen and the feature simply never turns on, with no error to explain why.
+  -->
+  <application>
+    <service
+      android:name="com.ally.nativemodule.FocusGuardService"
+      android:exported="true"
+      android:label="@string/ally_focus_guard_label"
+      android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+      <intent-filter>
+        <action android:name="android.accessibilityservice.AccessibilityService" />
+      </intent-filter>
+      <meta-data
+        android:name="android.accessibilityservice"
+        android:resource="@xml/ally_focus_guard_service" />
+    </service>
+  </application>
+
 </manifest>

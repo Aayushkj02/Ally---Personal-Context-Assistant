@@ -50,12 +50,29 @@ export interface PriorityScreenProps {
    * the native layer directly — that stays Aayush's boundary.
    */
   onApply?: (channels: Record<Channel, boolean>) => ChannelEnforcement[] | null;
+  /**
+   * Opens the system contact picker and resolves with what the user chose.
+   *
+   * Injected for the same reason as `onApply`, and typed structurally rather than imported, so
+   * this screen still never reaches the native layer. Resolves rather than rejects on cancel —
+   * backing out of the picker is an ordinary thing to do, not a failure.
+   *
+   * `starred` is reported for display only and is never stored: Android's DND scopes to starred
+   * contacts and nothing finer (ADR-111), and starring changes in Contacts at any time, so a
+   * saved copy would go stale and start lying.
+   */
+  onPickContact?: () => Promise<{
+    ok: boolean;
+    displayName?: string;
+    starred?: boolean;
+    reason?: string;
+  }>;
 }
 
 /** Study and Sleep, from the mode files. Focus was cut (ADR-004), so there is no third tab. */
 const MODE_TABS = getAllModeDefinitions().map((m) => ({ key: m.modeKey, label: m.name }));
 
-export default function PriorityScreen({ onApply }: PriorityScreenProps) {
+export default function PriorityScreen({ onApply, onPickContact }: PriorityScreenProps) {
   // Which tab is open and what the last Apply reported are both genuinely UI-only: nothing
   // outside this screen needs either, so neither belongs in the shared store.
   const [modeKey, setModeKey] = useState<string>(MODE_TABS[0]?.key ?? 'study');
@@ -98,6 +115,20 @@ export default function PriorityScreen({ onApply }: PriorityScreenProps) {
   const resolved = resolvePriority(profileId ?? '', prefs);
   const enforcement = describeEnforcement(resolved, lastEnforcement);
 
+  /**
+   * Whether the device has actually been asked yet.
+   *
+   * `describeEnforcement` is right to call a configured-but-unreported channel `failed` — that is
+   * the integration path, where a device report came back and simply omitted the channel, and
+   * "never assume it worked" is exactly the rule that should hold there.
+   *
+   * This screen passes `null`, which means something else entirely: Apply has not been pressed, so
+   * nothing has been attempted. Rendering that as a red "Failed" told the user Android had
+   * rejected their contacts when Ally had not yet said a word to it. The function is fine; the
+   * caller was conflating "not asked" with "asked and got silence".
+   */
+  const applied = lastEnforcement !== null;
+
   const apply = () => {
     if (!onApply) return;
     setLastEnforcement(onApply(resolved.channels));
@@ -132,7 +163,9 @@ export default function PriorityScreen({ onApply }: PriorityScreenProps) {
           placeholder={placeholder}
           profileId={profileId}
           prefs={prefs}
+          onPickContact={onPickContact}
           status={enforcement.find((e) => e.channel === channel)}
+          applied={applied}
           onReload={reload}
           onError={setError}
         />

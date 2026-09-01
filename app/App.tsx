@@ -10,7 +10,7 @@
  */
 
 import { useCallback, useEffect, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { AppState, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import type { ActionResult, CapabilityValue, Channel, DndMode } from './src/types';
 import { STATUS_PRESENTATION } from './src/types';
@@ -23,8 +23,15 @@ import {
   alarmDebugState,
   getNativeDeviceInfo,
   runDndProbe,
+  pickContact,
+  allyNativeSpike,
   applyPriorityPreferences,
   analyseCallLog,
+  // A7 — Study Mode Focus Guard. A redirect, not a block: see src/native/FocusGuard.ts.
+  syncFocusGuard,
+  focusGuardStatus,
+  focusGuardPresentation,
+  openFocusGuardSettings,
 } from './src/native';
 import { PriorityScreen } from './src/screens';
 import { evaluateEmergency, type ContextState, type EmergencyStatus } from './src/actions';
@@ -154,6 +161,14 @@ export default function App() {
   const [emergency, setEmergency] = useState<EmergencyStatus | null>(null);
   const [busy, setBusy] = useState(false);
   const [endError, setEndError] = useState<string | null>(null);
+  /**
+   * A7 — the Focus Guard status, re-read on every context refresh.
+   *
+   * Held as the RAW native status rather than the presentation object so that the mapping stays a
+   * pure function of state, computed at render. Null means the mock backend, which the
+   * presentation layer has its own honest sentence for.
+   */
+  const [focusGuard, setFocusGuard] = useState(() => focusGuardStatus());
   const deviceInfo = getNativeDeviceInfo();
 
   /** Re-reads whatever context is genuinely running. The DB is the source of truth. */
@@ -169,6 +184,26 @@ export default function App() {
       } else {
         setHeld(null);
       }
+
+      /*
+       * A7.7 / A7.8 — Focus Guard follows the SESSION, and it is reconciled here rather than at
+       * the two places a session starts and ends.
+       *
+       * This function already re-reads the database on every visit precisely because React state
+       * is not trustworthy after a process death; the guard has exactly the same problem, so it
+       * gets exactly the same answer. Reconciling from `active` means start, end, expiry, a
+       * recovered session, and a sleep session that must NOT restrict anything are all one branch
+       * instead of five call sites that could each be forgotten.
+       *
+       * The native side additionally expires itself at the session's end time, which covers the
+       * one case this cannot: Ally killed and never reopened.
+       */
+      setFocusGuard(
+        syncFocusGuard({
+          isStudy: active?.session.profileId === 'profile_study',
+          endsAt: active?.session.endsAt ?? null,
+        }),
+      );
     } catch {
       setSession(null);
       setHeld(null);
@@ -178,6 +213,21 @@ export default function App() {
   useEffect(() => {
     void refreshContext();
   }, [refreshContext]);
+
+  /**
+   * A7.10 — re-read Focus Guard whenever Ally comes back to the front.
+   *
+   * Accessibility access is granted in ANDROID's settings, in another app, with Ally backgrounded.
+   * Nothing inside Ally is notified when it happens, so returning to the front is the only
+   * reliable moment to ask again. Without this the card still reads "not set up" after the user
+   * has just set it up, which reads as the feature being broken.
+   */
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (next) => {
+      if (next === 'active') setFocusGuard(focusGuardStatus());
+    });
+    return () => sub.remove();
+  }, []);
 
   /**
    * A6.3 — the product path, and the only one Home uses.
@@ -244,6 +294,7 @@ export default function App() {
     return (
       <View style={{ flex: 1 }}>
         <PriorityScreen
+          onPickContact={pickContact}
           onApply={(channels: Record<Channel, boolean>) => {
             const r = applyPriorityPreferences({
               calls: channels.calls,
@@ -360,6 +411,12 @@ export default function App() {
       }}
       onOpenPriority={() => navigate('priority')}
       onOpenDevTools={() => navigate('devtools')}
+      focusGuard={focusGuardPresentation(focusGuard)}
+      onOpenFocusGuardSettings={() => {
+        // Re-reading is handled by the AppState listener above: the answer changes while Ally is
+        // in the background, so asking again on this line would only re-read the stale one.
+        openFocusGuardSettings();
+      }}
     />
   );
 }
@@ -680,6 +737,23 @@ function DeviceHarness({
 
       <Pressable style={[styles.btn, styles.btnProbe]} onPress={() => setProbe(runDndProbe())}>
         <Text style={styles.btnText}>Run device probe</Text>
+      </Pressable>
+
+      {/*
+        SPIKE ONLY. `ringer` has reported not_supported since Phase 2 and this is the button that
+        finds out whether that is still honest. It changes the real ringer for ~30s and puts the
+        original back in a finally. Nothing in the action engine calls it.
+      */}
+      <Pressable
+        style={[styles.btn, styles.btnProbe]}
+        onPress={() => {
+          setProbe({ status: 'ringer spike running — ~30s, restores your mode at the end' });
+          void allyNativeSpike()
+            .then((r) => setProbe(r))
+            .catch((e: unknown) => setProbe({ error: String(e) }));
+        }}
+      >
+        <Text style={styles.btnText}>SPIKE: ringer</Text>
       </Pressable>
 
       <Pressable style={[styles.btn, styles.btnProbe]} onPress={onOpenPriority}>

@@ -7,6 +7,8 @@ import android.net.Uri
 import android.os.Build
 import android.provider.Settings
 import expo.modules.kotlin.exception.Exceptions
+import expo.modules.kotlin.activityresult.AppContextActivityResultLauncher
+import expo.modules.kotlin.functions.Coroutine
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
 
@@ -32,6 +34,10 @@ class AllyNativeModule : Module() {
 
   private val context: Context
     get() = appContext.reactContext ?: throw Exceptions.ReactContextLost()
+
+  /** Assigned by RegisterActivityContracts at module init; null until that has run. */
+  private var contactPickerLauncher:
+    AppContextActivityResultLauncher<ContactPickInput, Map<String, Any?>>? = null
 
   override fun definition() = ModuleDefinition {
     Name("AllyNative")
@@ -181,6 +187,73 @@ class AllyNativeModule : Module() {
 
     Function("callLogHasPermission") { CallLogAnalyzer.hasPermission(context) }
     Function("callLogAnalyse") { CallLogAnalyzer.analyse(context) }
+
+    // SPIKE ONLY — is `ringer` implementable on this phone, or is `not_supported` still honest?
+    // Nothing in the action engine calls these. They are deleted if the answer is no.
+    Function("ringerIsAvailable") { RingerController.isAvailable(context) }
+    Function("ringerGetMode") { RingerController.currentMode(context) }
+    Function("ringerHasPolicyAccess") { RingerController.hasPolicyAccess(context) }
+    // AsyncFunction, not Function: the spike deliberately dwells at each step so the value can
+    // be sampled from outside the app, and ~27s on the JS thread would be an ANR.
+    AsyncFunction("ringerSpike") { dwellMs: Int ->
+      RingerController.spike(context, dwellMs.toLong())
+    }
+
+    // The system contact picker. Registered through Expo's activity-result contract rather than
+    // raw startActivityForResult: MainActivity is launchMode="singleTask", so a hand-rolled
+    // request code does not come back — BACK drops the user on their home screen and the promise
+    // never settles. Measured on device before this was rewritten.
+    RegisterActivityContracts {
+      contactPickerLauncher = registerForActivityResult(ContactPickContract(context))
+    }
+
+    Function("contactPickerIsAvailable") { ContactPicker.isAvailable(context) }
+
+    // Coroutine form, using the launcher's suspend `launch`. The callback overload would drag
+    // androidx.activity's ActivityResultCallback onto this module's classpath for no gain.
+    AsyncFunction("contactPickerOpen") Coroutine { ->
+      // Registration happens asynchronously at module init. Saying so beats hanging forever.
+      contactPickerLauncher?.launch(ContactPickInput())
+        ?: mapOf("ok" to false, "reason" to "not_ready")
+    }
+
+    // ---- Study Mode Focus Guard (A7) ----
+    //
+    // A REDIRECT, NOT A BLOCK, and the naming is load-bearing. Android offers an ordinary app no
+    // way to prevent an app from launching: SUSPEND_APPS is signature|verifier|role and needs
+    // device-owner besides. What these four functions drive is an AccessibilityService that
+    // notices a restricted app has reached the front and presses Home. See FocusGuard.kt.
+
+    Function("focusGuardStatus") { FocusGuard.status(context) }
+
+    /**
+     * Turns the guard on for one session.
+     *
+     * The list is passed IN rather than configured here: which apps count as distracting is a
+     * product decision the shell owns, and a native default would be a second source of truth.
+     * The expiresAt argument is the session's own end time in epoch millis (0 for
+     * open-ended), which is what lets a guard survive a process death without being able to
+     * outlive its session.
+     */
+    Function("focusGuardActivate") { entries: List<Map<String, String>>, expiresAt: Double ->
+      FocusGuard.activate(
+        context,
+        entries.mapNotNull { entry ->
+          val pkg = entry["package"]?.trim().orEmpty()
+          if (pkg.isEmpty()) {
+            null
+          } else {
+            FocusGuard.Entry(pkg, entry["label"]?.trim().orEmpty().ifEmpty { pkg })
+          }
+        },
+        expiresAt.toLong(),
+      )
+    }
+
+    Function("focusGuardDeactivate") { FocusGuard.deactivate(context) }
+
+    /** Android's accessibility list. There is no public deep link to one service's own toggle. */
+    Function("focusGuardOpenSettings") { FocusGuard.openSettings(context) }
   }
 
   private fun appDetailsIntent(): Intent =

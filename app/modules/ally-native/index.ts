@@ -39,6 +39,44 @@ export interface NativeApplyResult {
   rung: string;
 }
 
+/** One restricted app, named by the caller. Native never resolves labels — see FocusGuard.kt. */
+export interface RestrictedApp {
+  package: string;
+  label: string;
+}
+
+/**
+ * Raw Focus Guard state from the native side.
+ *
+ * WHY THERE ARE FIVE BOOLEANS AND NOT ONE. Each answers a different question the UI has to be able
+ * to ask, and collapsing them would hide the state the user can actually act on:
+ *
+ *   hasAccess        the user granted accessibility access to Ally's service
+ *   serviceConnected the system has actually bound and connected it
+ *   available        both of the above — the feature can work at all
+ *   active           the flag as last written, ignoring expiry: what was asked for
+ *   guarding         the decision, expiry applied: what is happening right now
+ *
+ * `hasAccess && !serviceConnected` is a real, reachable state (just after the toggle is flipped,
+ * or after Android stops the service while leaving the grant in place) and its fix differs from
+ * "you have not granted anything yet".
+ */
+export interface FocusGuardNativeStatus {
+  hasAccess: boolean;
+  serviceConnected: boolean;
+  available: boolean;
+  active: boolean;
+  guarding: boolean;
+  /** Epoch millis the guard self-expires at; 0 for open-ended. */
+  expiresAt: number;
+  packages: RestrictedApp[];
+  /** How many redirects this activation has performed. Reset on every activate. */
+  redirects: number;
+  lastPackage: string | null;
+  lastLabel: string | null;
+  lastAt: number | null;
+}
+
 export interface AllyNativeSpec {
   getDeviceInfo(): AllyNativeDeviceInfo;
   getPermissionStatus(key: AllyPermissionKey): boolean;
@@ -154,6 +192,31 @@ export interface AllyNativeSpec {
 
   callLogHasPermission(): boolean;
   callLogAnalyse(): Record<string, unknown>;
+
+  /**
+   * SPIKE ONLY — does `ringer` actually work on this phone, or is `not_supported` still the honest
+   * answer? Nothing in the action engine calls these; they are removed if the answer is no.
+   */
+  ringerIsAvailable(): boolean;
+  ringerGetMode(): string;
+  ringerHasPolicyAccess(): boolean;
+  ringerSpike(dwellMs: number): Promise<Record<string, unknown>>;
+
+  /** System contact picker. See ContactPicker.kt. */
+  contactPickerIsAvailable(): boolean;
+  contactPickerOpen(): Promise<Record<string, unknown>>;
+
+  /**
+   * Study Mode Focus Guard (A7). See FocusGuard.kt.
+   *
+   * A redirect, not a block: the service notices a restricted app has come to the front and
+   * presses Home. Nothing here prevents a launch, and no caller may describe it as if it does.
+   */
+  focusGuardStatus(): FocusGuardNativeStatus;
+  focusGuardActivate(entries: RestrictedApp[], expiresAt: number): FocusGuardNativeStatus;
+  focusGuardDeactivate(): FocusGuardNativeStatus;
+  /** Opens Android's accessibility list. No public deep link to one service's toggle exists. */
+  focusGuardOpenSettings(): boolean;
 }
 
 const AllyNative = requireOptionalNativeModule<AllyNativeSpec>('AllyNative');

@@ -30,6 +30,20 @@ import { Button, Card, ModeIndicator, Text } from '../../components';
 import { colors, spacing } from '../../theme';
 import type { ContextSession } from '../../types';
 import type { ContextState } from '../../actions';
+import type { FocusGuardPresentation } from '../../native/FocusGuard';
+
+/**
+ * A7 — Focus Guard tone to a theme colour name.
+ *
+ * The presentation layer decides the TONE (in native/FocusGuard.ts, where it is unit-tested); this
+ * screen only decides which of Dhrey's colours that tone wears. Keeping the mapping here means the
+ * tested logic never has to know a colour name, and the screen never has to reason about state.
+ */
+const TONE_TEXT_COLOR = {
+  success: 'success',
+  warning: 'warning',
+  neutral: 'textSecondary',
+} as const;
 
 /** Plain-language headline per context state. Never "Success" for a PARTIAL plan. */
 const STATE_COPY: Record<ContextState, string> = {
@@ -56,6 +70,15 @@ export interface HomeScreenProps {
   onOpenActive: () => void;
   onOpenPriority: () => void;
   onOpenDevTools: () => void;
+  /**
+   * A7 — what Ally may truthfully say about Focus Guard right now.
+   *
+   * A presentation object, not the raw native status: the decision about which of the five
+   * booleans matters is made and TESTED in native/FocusGuard.ts, so this screen cannot
+   * accidentally invent a sixth state or soften the wording of an existing one.
+   */
+  focusGuard: FocusGuardPresentation;
+  onOpenFocusGuardSettings: () => void;
 }
 
 /** "1h 57m", or null for an open-ended context. */
@@ -79,6 +102,8 @@ export default function HomeScreen({
   onOpenActive,
   onOpenPriority,
   onOpenDevTools,
+  focusGuard,
+  onOpenFocusGuardSettings,
 }: HomeScreenProps) {
   // The only local state, and only because a countdown has to re-render.
   const [now, setNow] = useState(() => Date.now());
@@ -147,6 +172,45 @@ export default function HomeScreen({
           </Text>
         </Card>
       )}
+
+      {/*
+        A7 — Focus Guard.
+
+        ALWAYS RENDERED, including when the feature is unavailable. A focus feature that silently
+        does nothing is worse than one that says out loud that it is off, and the state the user
+        most needs to see — accessibility access not granted — is exactly the state where there is
+        nothing else on screen to hint at it.
+
+        The last line is not decoration. It is the one sentence that keeps this feature honest:
+        the app does open, and Ally then sends the user home. Anything that reads as "Android
+        blocked it" would be false, and no ordinary app can do what that claim implies.
+      */}
+      <Card style={s.card}>
+        <View style={s.headRow}>
+          <Text preset="h3">Focus Guard</Text>
+          <Text preset="bodyMedium" color={TONE_TEXT_COLOR[focusGuard.tone]}>
+            {focusGuard.headline}
+          </Text>
+        </View>
+
+        <Text preset="caption" color="textSecondary">
+          {focusGuard.detail}
+        </Text>
+
+        {focusGuard.actionLabel === null ? null : (
+          <Button
+            label={focusGuard.actionLabel}
+            variant="secondary"
+            onPress={onOpenFocusGuardSettings}
+            style={s.action}
+          />
+        )}
+
+        <Text preset="caption" color="textTertiary">
+          Ally sends you back to your home screen. It cannot stop Android from opening an app — no
+          ordinary app can, and Ally does not claim to.
+        </Text>
+      </Card>
 
       <Card style={s.card}>
         <Text preset="h3">Who can reach you</Text>
