@@ -45,5 +45,7 @@ export { mirrorContextStart, mirrorContextEnd, createRecordingTransport } from '
 export type { SessionMirrorTransport, MirrorContext, MirrorOutcome } from './sessionMirror';
 export { explainResults, reasonsFor } from './provenance';
 export type { ExplainedResult } from './provenance';
+export { heldForSession, describeHeld } from './heldSettings';
+export type { HeldSetting, HeldOutcome } from './heldSettings';
 export { summarisePlan, summariseRestore, unreadableRestore } from './summaries';
 export type { PlanSummary, RestoreSummary } from './summaries';

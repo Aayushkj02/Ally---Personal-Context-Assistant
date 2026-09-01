@@ -181,6 +181,42 @@ describe('A6.7 — failures are explained, not dumped', () => {
 });
 
 // ---------------------------------------------------------------------------
+// A6.1 — recovered sessions (found on SM-S928B, not in a test run)
+// ---------------------------------------------------------------------------
+
+describe('A6.1 — a session recovered after a process death tells the truth', () => {
+  it('does not print a change count unconditionally', () => {
+    // The bug: `results` lives in React state, so a process death empties it, and the screen
+    // printed "0/0 changes applied" over a phone genuinely held at DND=priority / brightness 64.
+    // The count must now be reachable ONLY when it is a real count.
+    // The count text must sit on the FALSE branch of `recovered`, never on its own.
+    const note = activeContext.slice(activeContext.indexOf('changes applied') - 400);
+    expect(note).toContain('recovered');
+    expect(note).toMatch(/recovered[\s\S]{0,200}changes applied/);
+  });
+
+  it('falls back to the persisted snapshots rather than to "Nothing yet"', () => {
+    expect(activeContext).toContain('describeHeld');
+    expect(activeContext).toMatch(/results\.length === 0 && held !== null/);
+  });
+
+  it('labels recovered rows Held, never Applied', () => {
+    // A snapshot proves Ally captured the user's value, not that its own change succeeded.
+    // Rendering these through StatusChip would manufacture an ActionStatus that never existed.
+    const heldBlock = activeContext.slice(activeContext.indexOf('held.settings.map'));
+    expect(heldBlock).toContain('Held');
+    expect(heldBlock.slice(0, 600)).not.toContain('StatusChip');
+  });
+
+  it('the shell loads what is held on every context refresh', () => {
+    const app = readFileSync(join(SCREENS, '..', '..', 'App.tsx'), 'utf8');
+    expect(app).toContain('heldForSession');
+    // Cleared when nothing is running, so a stale holding cannot outlive its session.
+    expect(app).toMatch(/setHeld\(null\)/);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Office Kit — what this file does NOT cover
 // ---------------------------------------------------------------------------
 

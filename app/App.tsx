@@ -35,6 +35,8 @@ import {
   createRepositorySnapshotStore,
   mirrorContextStart,
   mirrorContextEnd,
+  heldForSession,
+  type HeldOutcome,
   type ExplainedResult,
   type LifecycleHooks,
 } from './src/actions';
@@ -139,6 +141,15 @@ export default function App() {
    * caption "Restored" rows with the explanation for why they were changed in the first place.
    */
   const [reasons, setReasons] = useState<readonly (string | null)[]>([]);
+  /**
+   * A6.1 — what Ally is holding, from the persisted snapshots.
+   *
+   * Loaded on every context refresh so that a session recovered after a process death can say what
+   * it is holding instead of "Nothing yet". `results` above is deliberately still in-memory: it is
+   * the richer per-action record and it is correct to lose it, but losing it must not read as
+   * "your phone is untouched".
+   */
+  const [held, setHeld] = useState<HeldOutcome | null>(null);
   const [priority, setPriority] = useState<ChannelEnforcement[] | null>(null);
   const [emergency, setEmergency] = useState<EmergencyStatus | null>(null);
   const [busy, setBusy] = useState(false);
@@ -154,9 +165,13 @@ export default function App() {
       if (active) {
         setLabel(active.session.profileId.replace(/^profile_/, '') || 'Context');
         setState(active.session.status === 'ACTIVE' ? 'ACTIVE' : 'READY');
+        setHeld(await heldForSession(active.session.id, createRepositorySnapshotStore()));
+      } else {
+        setHeld(null);
       }
     } catch {
       setSession(null);
+      setHeld(null);
     }
   }, []);
 
@@ -254,6 +269,7 @@ export default function App() {
         results={results}
         reasons={reasons}
         endError={endError}
+        held={held}
         priority={priority}
         emergency={emergency}
         busy={busy}

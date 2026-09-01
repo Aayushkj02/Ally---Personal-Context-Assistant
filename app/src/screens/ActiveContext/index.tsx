@@ -21,8 +21,8 @@ import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { StatusChip } from '../../components';
 import type { ActionResult, ChannelEnforcement, ContextSession } from '../../types';
 import { ENFORCEMENT_PRESENTATION, STATUS_PRESENTATION } from '../../types';
-import type { ContextState, EmergencyStatus } from '../../actions';
-import { describeEmergency } from '../../actions';
+import type { ContextState, EmergencyStatus, HeldOutcome } from '../../actions';
+import { describeEmergency, describeHeld } from '../../actions';
 import { colors, radius, spacing, typography } from '../../theme';
 
 const TONE_COLOR: Record<string, string> = {
@@ -63,6 +63,14 @@ export interface ActiveContextScreenProps {
    * leave them looking at a phone Ally is still holding.
    */
   endError?: string | null;
+  /**
+   * What Ally is still holding, read from the persisted snapshots (A6.1).
+   *
+   * Only consulted when `results` is empty, which after a process death is the difference between
+   * telling the user "Nothing yet" and telling them the truth. Never rendered as execution
+   * results: a snapshot proves Ally captured their value, not that its own change succeeded.
+   */
+  held?: HeldOutcome | null;
   busy?: boolean;
   onEnd: () => void;
   onCheckEmergency: () => void;
@@ -87,6 +95,7 @@ export default function ActiveContextScreen({
   priority,
   emergency,
   endError = null,
+  held = null,
   busy = false,
   onEnd,
   onCheckEmergency,
@@ -108,6 +117,22 @@ export default function ActiveContextScreen({
 
   const applied = results.filter((r) => r.status === 'applied').length;
   const copy = STATE_COPY[state];
+
+  /**
+   * A6.1 — the app was killed and reopened mid-session.
+   *
+   * `results` is empty because it lived in memory, NOT because the phone is untouched. The two
+   * look identical from here, so the persisted snapshots are what separates them: if Ally is
+   * holding rows on disk, this session did change the phone and the screen has to say so.
+   */
+  const recovered = results.length === 0 && held !== null;
+
+  /** Never "0 settings": an unreadable store is a different statement from an empty one. */
+  const heldCount = !held
+    ? ''
+    : !held.readable
+      ? 'Ally cannot read what it is holding'
+      : `Ally is holding ${held.settings.length} of your settings`;
 
   if (!session) {
     return (
@@ -134,14 +159,43 @@ export default function ActiveContextScreen({
         {countdown ? <Text style={s.countdown}>{countdown} left</Text> : null}
       </View>
 
+      {/*
+        "0/0 changes applied" is only true when a plan genuinely applied nothing. After a process
+        death it was printed over a phone sitting at DND=priority and brightness 64 — measured on
+        SM-S928B — which told the user their settings were free when Ally was still holding them.
+      */}
       <Text style={s.note}>
-        {applied}/{results.length} changes applied · session {session.status.toLowerCase()}
+        {recovered
+          ? `${heldCount} · session ${session.status.toLowerCase()}`
+          : `${applied}/${results.length} changes applied · session ${session.status.toLowerCase()}`}
       </Text>
 
       {/* A-V10: one row per action, in its own truthful status. */}
       <View style={s.card}>
         <Text style={s.h2}>What Ally changed</Text>
-        {results.length === 0 ? <Text style={s.empty}>Nothing yet.</Text> : null}
+        {results.length === 0 ? (
+          <Text style={s.empty}>{recovered && held ? describeHeld(held) : 'Nothing yet.'}</Text>
+        ) : null}
+
+        {/*
+          The held rows, from the snapshots rather than from execution results. Labelled HELD and
+          not `applied` on purpose: a snapshot proves Ally captured the user's value, not that its
+          own change went through, and inventing an `applied` here would be exactly the fabrication
+          the rest of this screen refuses to make.
+        */}
+        {recovered && held?.readable
+          ? held.settings.map((h) => (
+              <View key={`held-${h.capability}`} style={s.row}>
+                <View style={s.rowHead}>
+                  <Text style={s.rowTitle}>{h.capability}</Text>
+                  <View style={[s.badge, { backgroundColor: colors.info }]}>
+                    <Text style={s.badgeText}>Held</Text>
+                  </View>
+                </View>
+                <Text style={s.rowDetail}>goes back to {String(h.previousValue)}</Text>
+              </View>
+            ))
+          : null}
         {results.map((r, i) => {
           return (
             <View key={`${r.capability}-${i}`} style={s.row}>
