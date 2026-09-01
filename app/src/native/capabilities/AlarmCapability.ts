@@ -182,6 +182,11 @@ export interface AlarmDismissOutcome {
  *
  * Scoped to Ally's own label, which is the only targeting Android offers and is also the safety
  * property: there is no argument here that could name the user's own alarms.
+ *
+ * `ok` MEANS ACCEPTED, NOT DONE. Measured on SM-S928B: the alarm survives this intent, still
+ * enabled — confirmed both through Ally and by firing the intent from adb, bypassing Ally. Samsung
+ * honours DISMISS for a ringing or snoozed alarm, not a scheduled one. The message says so, and
+ * `reason: "accepted"` marks the distinction for any caller that wants to branch on it.
  */
 export function dismissAlarm(
   native: AllyNativeSpec,

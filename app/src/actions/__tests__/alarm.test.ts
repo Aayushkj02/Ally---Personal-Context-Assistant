@@ -33,6 +33,7 @@ import {
   __getMockState,
   __setMockClockAvailable,
   __setMockClockRefuses,
+  __setMockClockHonoursDismiss,
   __simulateProcessDeath,
 } from '../../native/MockDevice';
 import { startContext, endContext, createInMemorySnapshotStore, summarisePlan } from '../index';
@@ -257,7 +258,7 @@ describe('A5.1 — refusals are distinguishable', () => {
 // ---------------------------------------------------------------------------
 
 describe('A5.4 — changing 07:00 to 07:30', () => {
-  it('dismiss-then-set leaves one alarm at the new time and no 07:00 behind', async () => {
+  it('against a COMPLIANT Clock, dismiss-then-set leaves one alarm and no 07:00 behind', async () => {
     await run(alarmPlan('07:00'));
     expect(allyAlarms().map((a) => a.time)).toEqual(['07:00']);
 
@@ -269,10 +270,25 @@ describe('A5.4 — changing 07:00 to 07:30', () => {
     expect(allyAlarms().map((a) => a.time)).toEqual(['07:30']);
     expect(userAlarms()).toEqual([USER_ALARM]);
   });
+
+  it('against the SAMSUNG, the old 07:00 survives and both alarms remain', async () => {
+    // Measured on SM-S928B, twice: through Ally and by firing DISMISS_ALARM straight from adb.
+    // A scheduled alarm is not removed, so dismiss-then-set leaves a duplicate. Recorded as a test
+    // rather than a footnote, because it is the reason A5.4 cannot be called PASS on this phone.
+    __setMockClockHonoursDismiss(false);
+
+    await run(alarmPlan('07:00'));
+    dismissMockAlarm(SESSION);
+    await run(alarmPlan('07:30'));
+
+    expect(allyAlarms().map((a) => a.time)).toEqual(['07:00', '07:30']);
+    // The user's own alarms are still untouched, which remains true either way.
+    expect(userAlarms()).toEqual([USER_ALARM]);
+  });
 });
 
 describe('A5.5 — native dismissal', () => {
-  it("removes Ally's alarm and only Ally's", async () => {
+  it("removes Ally's alarm and only Ally's, on a Clock that honours it", async () => {
     await run(alarmPlan('07:00'));
     expect(__getMockAlarms()).toHaveLength(2);
 
@@ -283,7 +299,20 @@ describe('A5.5 — native dismissal', () => {
     expect(userAlarms()).toEqual([USER_ALARM]);
   });
 
+  it('never claims the alarm is gone — ok means ACCEPTED, because that is all we know', async () => {
+    await run(alarmPlan('07:00'));
+    const out = dismissMockAlarm(SESSION);
+
+    expect(out.reason).toBe('accepted');
+    expect(out.message).toMatch(/android decides/i);
+    // The claim we are entitled to make, and not one word more.
+    expect(out.message).not.toMatch(/dismissed|removed|cancelled/i);
+  });
+
   it('clears the idempotency record, so the next request is sent rather than skipped', async () => {
+    // Deliberate, and a trade rather than an oversight: on a Clock that ignores dismissal this
+    // can leave a duplicate. Keeping the record would instead mean a user who asks again gets
+    // `skipped` and NO alarm. A duplicate is noise; a missing wake-up is a missed morning.
     await run(alarmPlan('07:00'));
     dismissMockAlarm(SESSION);
 

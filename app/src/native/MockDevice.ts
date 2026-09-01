@@ -144,6 +144,14 @@ const USER_ALARM: MockAlarm = { time: '06:00', weekdays: true, label: 'Work' };
 let clock: MockAlarm[] = [{ ...USER_ALARM }];
 let clockAvailable = true;
 let clockRefuses = false;
+/**
+ * Whether the Clock ACTS on DISMISS_ALARM for a scheduled alarm.
+ *
+ * Default true — a compliant Clock, which keeps the code path exercised. Samsung's does NOT, and
+ * that was measured rather than assumed (ADR-127), so the false case has its own test below. This
+ * is the one place the mock is knowingly more capable than the phone we ship on, and it says so.
+ */
+let clockHonoursDismiss = true;
 
 /**
  * What Ally last sent per session — SharedPreferences, so it survives __simulateProcessDeath()
@@ -202,6 +210,7 @@ export function __resetMockState(): void {
   clock = [{ ...USER_ALARM }];
   clockAvailable = true;
   clockRefuses = false;
+  clockHonoursDismiss = true;
   alarmSent.clear();
 }
 
@@ -218,6 +227,11 @@ export function __setMockClockAvailable(available: boolean): void {
 /** Test hook: a Clock that is there and refuses, which is a different answer from absent. */
 export function __setMockClockRefuses(refuses: boolean): void {
   clockRefuses = refuses;
+}
+
+/** Test hook: the Samsung's measured behaviour — the dismiss intent is accepted and does nothing. */
+export function __setMockClockHonoursDismiss(honours: boolean): void {
+  clockHonoursDismiss = honours;
 }
 
 /** Test hook: the device's true raw brightness, which the percent contract cannot express. */
@@ -728,13 +742,18 @@ export function dismissMockAlarm(sessionId: string | null = null): {
     return { ok: false, reason: 'error', message: 'Your Clock app would not dismiss the alarm.' };
   }
 
-  clock = clock.filter((a) => a.label !== ALLY_ALARM_LABEL);
+  if (clockHonoursDismiss) clock = clock.filter((a) => a.label !== ALLY_ALARM_LABEL);
+
+  // Cleared either way, deliberately: keeping it would mean a user who asks for the alarm again
+  // gets `skipped` and no alarm at all. A duplicate is noise; a missing wake-up is a missed
+  // morning. Mirrors AlarmController.dismiss().
   if (sessionId !== null) alarmSent.delete(sessionId);
 
+  // `ok` means ACCEPTED, not done — the Clock may keep the alarm, and on the Samsung it does.
   return {
     ok: true,
-    reason: null,
-    message: `Asked your Clock app to dismiss ${ALLY_ALARM_LABEL}.`,
+    reason: 'accepted',
+    message: `Asked your Clock app to dismiss ${ALLY_ALARM_LABEL}. Android decides whether it acts.`,
   };
 }
 

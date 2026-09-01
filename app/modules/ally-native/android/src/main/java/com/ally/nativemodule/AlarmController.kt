@@ -161,10 +161,17 @@ object AlarmController {
    * Scoped by LABEL, which is the only targeting the platform offers and is also the safety
    * property: there is no expression here that could name the user's own alarms.
    *
-   * WHAT "DISMISS" MEANS IS THE PLATFORM'S TO DECIDE, and it is not the same as delete. For a
-   * recurring alarm the documented behaviour is to dismiss the upcoming occurrence, so a weekday
-   * alarm may well survive as a rule. That is a real limitation, reported rather than papered
-   * over, and what the Samsung actually does is recorded in DEVICE_NOTES.
+   * WHAT "DISMISS" MEANS IS THE PLATFORM'S TO DECIDE, and on the device we ship on the answer is
+   * "nothing" (ADR-127). Measured on SM-S928B: sending this intent for a scheduled 07:00 alarm
+   * leaves it in the Clock, still enabled. Confirmed twice — through Ally, and by firing the
+   * intent straight from adb with ALARM_SEARCH_MODE_TIME, bypassing Ally entirely. Samsung's
+   * Clock appears to honour DISMISS only for an alarm that is currently ringing or snoozed, which
+   * is consistent with what the API documents and is not what "cancel my alarm" means to a user.
+   *
+   * SO THIS CANNOT REPORT SUCCESS. `ok` means the Clock accepted the request and nothing more —
+   * the same narrowed meaning `set()` uses — and the message says so out loud rather than
+   * claiming the alarm is gone. Everything else in this codebase refuses to call an unverified
+   * write a success, and an operation we have watched do nothing is the last place to start.
    */
   fun dismiss(context: Context, sessionId: String?): Map<String, Any?> {
     val intent = Intent(AlarmClock.ACTION_DISMISS_ALARM)
@@ -181,10 +188,19 @@ object AlarmController {
 
     return try {
       context.startActivity(intent)
-      // The record goes with it: whatever the Clock did, Ally is no longer holding this identity,
-      // so the next request must be sent rather than skipped as a duplicate.
+
+      // The idempotency record is cleared even though the alarm may well survive, and that is a
+      // deliberate trade rather than an oversight. Keeping it would mean a user who asks for the
+      // alarm again gets `skipped` and no alarm at all; clearing it means they may end up with a
+      // duplicate they can delete. A duplicate is noise. A missing wake-up is a missed morning.
       if (sessionId != null) prefs(context).edit().remove(sessionId).commit()
-      result(true, null, "Asked your Clock app to dismiss $LABEL.", target = target)
+
+      result(
+        true, "accepted",
+        "Asked your Clock app to dismiss $LABEL. Android decides whether it acts — on this phone " +
+          "a scheduled alarm is not removed, so check your Clock.",
+        target = target,
+      )
     } catch (t: Throwable) {
       result(false, "error", t.message ?: "Your Clock app would not dismiss the alarm.", target = target)
     }
