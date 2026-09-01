@@ -13,7 +13,8 @@
  */
 
 import { useCallback, useEffect, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { PriorityEditor } from './PriorityEditor';
 
 import type { Channel, ChannelEnforcement, PriorityPreference } from '../../types';
 import { CHANNEL_ENFORCEABLE, ENFORCEMENT_PRESENTATION } from '../../types';
@@ -71,7 +72,6 @@ export default function PriorityScreen({ onApply }: PriorityScreenProps) {
   const [profileId, setProfileId] = useState<string | null>(null);
 
   const [prefs, setPrefs] = useState<PriorityPreference[]>([]);
-  const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
 
   const reload = useCallback(async () => {
@@ -97,23 +97,6 @@ export default function PriorityScreen({ onApply }: PriorityScreenProps) {
 
   const resolved = resolvePriority(profileId ?? '', prefs);
   const enforcement = describeEnforcement(resolved, lastEnforcement);
-
-  const add = async (channel: Channel) => {
-    const subject = (drafts[channel] ?? '').trim();
-    if (!subject || !profileId) return;
-    try {
-      await priorityRepository.addPreference({
-        profileId,
-        channel,
-        subject,
-        subjectKind: channel === 'whatsapp' && /group/i.test(subject) ? 'contactGroup' : 'contact',
-      });
-      setDrafts((d) => ({ ...d, [channel]: '' }));
-      await reload();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Could not save.');
-    }
-  };
 
   const apply = () => {
     if (!onApply) return;
@@ -141,79 +124,19 @@ export default function PriorityScreen({ onApply }: PriorityScreenProps) {
 
       {error ? <Text style={s.error}>{error}</Text> : null}
 
-      {CHANNEL_SECTIONS.map(({ channel, title, placeholder }) => {
-        const rows = prefs.filter((p) => p.channel === channel);
-        const status = enforcement.find((e) => e.channel === channel);
-        // An empty enforceable channel gets no badge at all. "Not supported on this device"
-        // is a claim about the phone, and saying it about an empty list is simply false.
-        const showBadge = rows.length > 0 || !CHANNEL_ENFORCEABLE[channel];
-        const presentation = status && showBadge ? ENFORCEMENT_PRESENTATION[status.status] : null;
-
-        return (
-          <View key={channel} style={s.section}>
-            <View style={s.sectionHead}>
-              <Text style={s.h2}>{title}</Text>
-              {presentation ? (
-                <View
-                  style={[
-                    s.badge,
-                    { backgroundColor: TONE_COLOR[presentation.tone] ?? colors.neutral },
-                  ]}
-                >
-                  <Text style={s.badgeText}>{presentation.label}</Text>
-                </View>
-              ) : null}
-            </View>
-
-            {CHANNEL_ENFORCEABLE[channel] ? null : (
-              <Text style={s.note}>
-                Ally remembers this. Android gives no app a way to control WhatsApp notifications,
-                so your phone will not change.
-              </Text>
-            )}
-
-            {rows.length === 0 ? <Text style={s.empty}>No one added yet.</Text> : null}
-
-            {rows.map((p) => (
-              <View key={p.id} style={s.item}>
-                <Pressable
-                  style={s.itemMain}
-                  onPress={async () => {
-                    await priorityRepository.setEnabled(p.id, !p.enabled);
-                    await reload();
-                  }}
-                >
-                  <Text style={[s.tick, p.enabled && s.tickOn]}>{p.enabled ? 'ON' : 'off'}</Text>
-                  <Text style={[s.itemText, !p.enabled && s.itemTextOff]}>{p.subject}</Text>
-                  {p.subjectKind === 'contactGroup' ? <Text style={s.tag}>group</Text> : null}
-                </Pressable>
-                <Pressable
-                  onPress={async () => {
-                    await priorityRepository.removePreference(p.id);
-                    await reload();
-                  }}
-                >
-                  <Text style={s.remove}>Remove</Text>
-                </Pressable>
-              </View>
-            ))}
-
-            <View style={s.addRow}>
-              <TextInput
-                style={s.input}
-                placeholder={placeholder}
-                placeholderTextColor={colors.textTertiary}
-                value={drafts[channel] ?? ''}
-                onChangeText={(t) => setDrafts((d) => ({ ...d, [channel]: t }))}
-                onSubmitEditing={() => void add(channel)}
-              />
-              <Pressable style={s.addBtn} onPress={() => void add(channel)}>
-                <Text style={s.addBtnText}>Add</Text>
-              </Pressable>
-            </View>
-          </View>
-        );
-      })}
+      {CHANNEL_SECTIONS.map(({ channel, title, placeholder }) => (
+        <PriorityEditor
+          key={channel}
+          channel={channel}
+          title={title}
+          placeholder={placeholder}
+          profileId={profileId}
+          prefs={prefs}
+          status={enforcement.find((e) => e.channel === channel)}
+          onReload={reload}
+          onError={setError}
+        />
+      ))}
 
       {resolved.requiresStarring.length > 0 ? (
         <View style={s.warn}>

@@ -15,3 +15,5 @@ export { Card } from './Card';
 export { StatusChip } from './StatusChip';
 export { Timer } from './Timer';
 export { PermissionRow } from './PermissionRow';
+export { StatusRow } from './StatusRow';
+export { ModeIndicator } from './ModeIndicator';

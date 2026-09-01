@@ -10,6 +10,7 @@
 import { getModeDefinition, MODES } from '../modes';
 import { getDatabase } from './database';
 import { profileRepository } from './repositories';
+import type { ContextProfile } from '../types/models';
 
 /**
  * Create the profile row for each known mode if it does not exist yet.
@@ -38,7 +39,7 @@ export async function ensureSeeded(now: number = Date.now()): Promise<void> {
     await profileRepository.createProfile({
       id: `profile_${modeKey}`,
       name: definition.name,
-      modeKey: definition.modeKey as 'study' | 'sleep',
+      modeKey: definition.modeKey as ContextProfile['modeKey'],
       createdAt: now,
       updatedAt: now,
     });
