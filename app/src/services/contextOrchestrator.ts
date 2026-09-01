@@ -201,7 +201,7 @@ export async function activateFromText(
         const target = allPrefs.find(
           (p) =>
             p.channel === (exception.channel ?? 'calls') &&
-            p.subject.toLowerCase() === exception.value.toLowerCase()
+            p.subject.toLowerCase() === exception.value.toLowerCase(),
         );
         if (target) {
           await priorityRepository.removePreference(target.id);
@@ -247,7 +247,12 @@ export async function activateFromText(
   });
 
   // 7.5 Phase 5 Sleep Session & Alarm Metadata (D5.4)
-  if (intent.activity === 'sleep' && intent.schedule && intent.schedule.kind !== 'none' && intent.schedule.time) {
+  if (
+    intent.activity === 'sleep' &&
+    intent.schedule &&
+    intent.schedule.kind !== 'none' &&
+    intent.schedule.time
+  ) {
     await alarmRepository.createAlarmMetadata({
       id: newId('alarm', now),
       sessionId: session.id,

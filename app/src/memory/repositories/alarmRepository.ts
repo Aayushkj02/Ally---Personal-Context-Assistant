@@ -13,10 +13,13 @@ const COLUMNS = 'id, sessionId, time, recurrence, createdAt';
 export const alarmRepository = {
   async createAlarmMetadata(alarm: AlarmMetadata): Promise<void> {
     const db = await getDatabase();
-    await db.runAsync(
-      `INSERT INTO alarm_metadata (${COLUMNS}) VALUES (?, ?, ?, ?, ?)`,
-      [alarm.id, alarm.sessionId, alarm.time, alarm.recurrence, alarm.createdAt],
-    );
+    await db.runAsync(`INSERT INTO alarm_metadata (${COLUMNS}) VALUES (?, ?, ?, ?, ?)`, [
+      alarm.id,
+      alarm.sessionId,
+      alarm.time,
+      alarm.recurrence,
+      alarm.createdAt,
+    ]);
   },
 
   async getAlarmMetadataBySession(sessionId: string): Promise<AlarmMetadata[]> {
